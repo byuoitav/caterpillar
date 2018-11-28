@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/byuoitav/caterpillar/config"
+	"github.com/byuoitav/caterpillar/hatchery/store"
 	"github.com/byuoitav/common/log"
 )
 
@@ -15,15 +16,13 @@ const (
 //It's a starcraft joke...
 type Queen struct {
 	config   config.Caterpillar
-	storeLoc string
 	runMutex *sync.Mutex
 }
 
 //SpawnQueen .
-func SpawnQueen(c config.Caterpillar, storeLoc string) Queen {
+func SpawnQueen(c config.Caterpillar) Queen {
 	return Queen{
 		config:   c,
-		storeLoc: storeLoc,
 		runMutex: &sync.Mutex{},
 	}
 }
@@ -39,8 +38,7 @@ func (q Queen) Run() {
 	log.L.Infof("Starting run of %v.", q.config.ID)
 
 	//get the information from the store
-
-	info, err := store.GetInfo(q.storeLoc, q.config.ID)
+	info, err := store.GetInfo(q.config.ID)
 
 	//get the number of records since the last run... (check last-event-time from the stored data)
 
