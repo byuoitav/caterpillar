@@ -23,7 +23,7 @@ func InitializeHatchery() (*Hatchery, *nerr.E) {
 	toReturn.Cron = cron.New()
 
 	for _, i := range c.Caterpillars {
-		q := SpawnQueen(i, c.StoreLocation)
+		q := SpawnQueen(i)
 
 		toReturn.Queens = append(toReturn.Queens, q)
 		toReturn.Cron.AddJob(i.Interval, q)

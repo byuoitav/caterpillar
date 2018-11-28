@@ -1,0 +1,20 @@
+{
+  "caterpillars": [
+    {
+      "id": "joe_test",
+      "type": "joe_test",
+      "index": "av-all-events*",
+      "interval": "0 * * * * *",
+      "time-field": "timestamp",
+      "max-interval": "",
+      "query": {
+        "query": {
+          "bool": {
+            "must": [{"match": {"generating-system": "ITB-1101-CP1"}}]
+          }
+        }
+      }
+    }
+  ],
+  "store-location": "/home/sir/work/badgertest/caterpillar"
+}

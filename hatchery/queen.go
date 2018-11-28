@@ -38,9 +38,10 @@ func (q Queen) Run() {
 	log.L.Infof("Starting run of %v.", q.config.ID)
 
 	//get the information from the store
-	info, err := store.GetInfo(q.config.ID)
+	store.GetInfo(q.config.ID)
 
-	//get the number of records since the last run... (check last-event-time from the stored data)
+	//get the feeder, from that we can get the number of events.
 
 	q.runMutex.Unlock()
+
 }

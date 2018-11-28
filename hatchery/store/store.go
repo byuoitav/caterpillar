@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"encoding/gob"
+	"strings"
 	"sync"
 
 	"github.com/byuoitav/caterpillar/config"
@@ -54,6 +55,10 @@ func GetInfo(id string) (config.State, *nerr.E) {
 		return err
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), "Key not found") {
+			return config.State{}, nil
+		}
+
 		return config.State{}, nerr.Translate(err).Addf("Couldn't get %v from store", id)
 	}
 
