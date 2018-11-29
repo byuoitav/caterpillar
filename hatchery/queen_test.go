@@ -61,7 +61,35 @@ func TestSpawnQueen(t *testing.T) {
 	t.Log(q)
 }
 
-func TestFeeder(t *testing.T) {
+func TestFeederCount(t *testing.T) {
+	c, err := config.GetConfig()
+	if err != nil {
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	info, err := store.GetInfo(c.Caterpillars[0].ID)
+	if err != nil {
+		t.Log(err.Type)
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	f, err := feeder.GetFeeder(c.Caterpillars[0], info.LastEventTime)
+	if err != nil {
+		t.Log(err.Type)
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	count, err := f.GetCount()
+	if err != nil {
+		t.Log(err.Type)
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	t.Logf("count: %v", count)
+
+}
+
+func TestFeederFeeding(t *testing.T) {
 	c, err := config.GetConfig()
 	if err != nil {
 		t.Error(err.Error())

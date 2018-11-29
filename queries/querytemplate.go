@@ -11,11 +11,12 @@ import (
 //ELKQueryTemplate shows the template that we use for elk queries. The queries specified for a specific caterpillar wil be unmarshalled into this structure.
 //Becasue we may have to batch documents from ELK the query should NOT include a date/time range query. This will be added by the feeder as it retreives data.
 type ELKQueryTemplate struct {
-	Query  ElkQueryDSL `json:"query,omitempty"`
-	Aggs   interface{} `json:"aggs,omitempty"`
-	From   int         `json:"from,omitempty"`
-	Size   int         `json:"size,omitempty"`
-	Source interface{} `json:"_source,omitempty"`
+	Query  ElkQueryDSL         `json:"query,omitempty"`
+	Aggs   interface{}         `json:"aggs,omitempty"`
+	From   int                 `json:"from,omitempty"`
+	Size   int                 `json:"size,omitempty"`
+	Sort   []map[string]string `json:"sort,omitempty"`
+	Source interface{}         `json:"_source,omitempty"`
 }
 
 //ElkQueryDSL .
@@ -47,6 +48,27 @@ type DateRange struct {
 type CountResponse struct {
 	Count  int            `json:"count"`
 	Shards map[string]int `json:"_shards"`
+}
+
+//QueryResponse is a response from ELK with hits included
+type QueryResponse struct {
+	Took     int  `json:"took"`
+	TimedOut bool `json:"timed_out"`
+	Shards   struct {
+		Total      int `json:"total"`
+		Successful int `json:"successful"`
+		Skipped    int `json:"skipped"`
+		Failed     int `json:"failed"`
+	} `json:"_shards"`
+	Hits struct {
+		Total int `json:"total"`
+		Hits  []struct {
+			Index  string      `json:"_index"`
+			Type   string      `json:"_type"`
+			ID     string      `json:"_id"`
+			Source interface{} `json:"_source"`
+		} `json:"hits"`
+	} `json:"hits"`
 }
 
 //GetQueryTemplateFromFile .
