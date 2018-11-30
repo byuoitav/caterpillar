@@ -18,10 +18,10 @@ import (
 var MaxSize = 10000
 
 type elkFeeder struct {
-	startTime  time.Time
-	endTime    time.Time
-	eventcount int
-
+	startTime    time.Time
+	endTime      time.Time
+	eventcount   int
+	eventssent   int
 	eventChannel chan interface{}
 
 	config config.Caterpillar
@@ -72,7 +72,15 @@ func (e *elkFeeder) getElkCount() (int, *nerr.E) {
 
 	e.baseQuery = query
 
-	queryBytes := e.getAllQuery()
+	q, err := e.getCountQuery()
+	if err != nil {
+		return 0, err.Addf("Couln't get count for caterpillar %v", e.config.ID)
+	}
+
+	queryBytes, er := json.Marshal(q)
+	if er != nil {
+		return 0, nerr.Translate(er).Addf("Couldn't get count for caterpillar %v", e.config.ID)
+	}
 
 	respBytes, err := elk.MakeELKRequest("POST", fmt.Sprintf("/%v/_count", e.config.Index), queryBytes)
 	if err != nil {
@@ -81,7 +89,7 @@ func (e *elkFeeder) getElkCount() (int, *nerr.E) {
 
 	var cr queries.CountResponse
 
-	er := json.Unmarshal(respBytes, &cr)
+	er = json.Unmarshal(respBytes, &cr)
 	if er != nil {
 		return 0, nerr.Translate(er).Addf("Couldn't get count. Unkown response %s", respBytes)
 	}
@@ -95,19 +103,45 @@ func (e *elkFeeder) StartFeeding(capacity int) (chan interface{}, *nerr.E) {
 	//make our channel
 	e.eventChannel = make(chan interface{}, capacity)
 
-	var queryBytes []byte
 	var err *nerr.E
 
 	//get our first batch
 	e.windowLength = calculateBatches(e.eventcount, e.startTime, e.endTime)
+	e.curWindowStart = e.startTime
 	vals, err := e.getNextBatch()
 	if err != nil {
 		return e.eventChannel, err.Addf("Couldn't start feeing. Couldn't get initial batch.")
 	}
 
-	//otherwise we start our feeder
+	//otherwise we start our feeder.
+	go e.run(vals)
 
 	return e.eventChannel, nil
+}
+
+func (e *elkFeeder) run(events []interface{}) {
+	var err *nerr.E
+	log.L.Infof("Starting feeing caterpillar %v. Initial round size %v", e.config.ID, len(events))
+
+	for {
+		for i := range events {
+			e.eventChannel <- events[i]
+			e.eventssent++
+		}
+		if e.eventssent >= e.eventcount {
+			log.L.Infof("Feeding of caterpillar %v done. Closing the feeder.", e.config.ID)
+			return
+		}
+		log.L.Debugf("Finished that round of feed. Getting more. Finished feeding %v/%v events", e.eventssent, e.eventcount)
+		//get the next batch
+		events, err = e.getNextBatch()
+		if err != nil {
+			log.L.Errorf("Couldn't continue feeding of caterpillar %v: %v", e.config.ID, err.Error())
+			log.L.Debugf("detailed error info: %v, %s", err.Type, err.Stack)
+			return
+		}
+		log.L.Debugf("Next feed batch size for %v is  %v events", e.config.ID, len(events))
+	}
 }
 
 func (e *elkFeeder) executeQuery(q queries.ELKQueryTemplate) (queries.QueryResponse, *nerr.E) {
@@ -128,7 +162,7 @@ func (e *elkFeeder) executeQuery(q queries.ELKQueryTemplate) (queries.QueryRespo
 		return queries.QueryResponse{}, nerr.Translate(er).Addf("Couldn't execute query.")
 	}
 
-	return queries.QueryResponse{}, nil
+	return toReturn, nil
 }
 
 func (e *elkFeeder) getNextBatch() ([]interface{}, *nerr.E) {
@@ -242,6 +276,26 @@ func buildQuery(base queries.ELKQueryTemplate, StartTime, EndTime time.Time, tim
 	return base, nil
 }
 
+func (e *elkFeeder) getCountQuery() (queries.ELKQueryTemplate, *nerr.E) {
+
+	base := e.baseQuery
+	//check to see if we're out of window.
+	if e.startTime.After(e.endTime) || e.startTime.Equal(e.endTime) {
+		return base, nerr.Create("out of time window.", "out-of-window")
+	}
+
+	base.Query.Bool.Filter = append(base.Query.Bool.Filter, queries.TimeRangeFilter{
+		Range: map[string]queries.DateRange{
+			e.config.TimeField: queries.DateRange{
+				StartTime: e.startTime,
+				EndTime:   e.endTime,
+			},
+		},
+	})
+
+	return base, nil
+}
+
 //getNextQuery is not idempotent. It will increment current window start to be the end of the query just sent.
 func (e *elkFeeder) getNextQuery() (queries.ELKQueryTemplate, *nerr.E) {
 	curQuery := e.baseQuery
@@ -267,13 +321,15 @@ func (e *elkFeeder) getNextQuery() (queries.ELKQueryTemplate, *nerr.E) {
 }
 
 func calculateBatches(count int, start, end time.Time) time.Duration {
+
 	if count <= MaxSize {
-		return start.Sub(end)
+		return end.Sub(start)
 	}
 
 	batches := ((count / MaxSize) + 1) * 2
 
 	dur := end.Sub(start) / time.Duration(batches)
+	log.L.Debugf("dur: %v", dur)
 
 	return dur
 }

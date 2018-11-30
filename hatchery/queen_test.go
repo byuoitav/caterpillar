@@ -7,6 +7,7 @@ import (
 	"github.com/byuoitav/caterpillar/config"
 	"github.com/byuoitav/caterpillar/hatchery/feeder"
 	"github.com/byuoitav/caterpillar/hatchery/store"
+	"github.com/byuoitav/common/log"
 )
 
 func TestConfig(t *testing.T) {
@@ -115,4 +116,62 @@ func TestFeederFeeding(t *testing.T) {
 	}
 	t.Logf("count: %v", count)
 
+	log.SetLevel("debug")
+
+	t.Logf("Starting feeding..")
+	feedchan, err := f.StartFeeding(100)
+	if err != nil {
+		t.Log(err.Type)
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	processed := 0
+
+	for processed < count {
+		<-feedchan
+		processed++
+	}
+}
+func TestFeederBatchFeeding(t *testing.T) {
+	c, err := config.GetConfig()
+	if err != nil {
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	info, err := store.GetInfo(c.Caterpillars[0].ID)
+	if err != nil {
+		t.Log(err.Type)
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	f, err := feeder.GetFeeder(c.Caterpillars[0], info.LastEventTime)
+	if err != nil {
+		t.Log(err.Type)
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	count, err := f.GetCount()
+	if err != nil {
+		t.Log(err.Type)
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	t.Logf("count: %v", count)
+
+	log.SetLevel("debug")
+	feeder.MaxSize = 100
+
+	t.Logf("Starting feeding..")
+	feedchan, err := f.StartFeeding(100)
+	if err != nil {
+		t.Log(err.Type)
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	processed := 0
+
+	for processed < count {
+		<-feedchan
+		processed++
+	}
 }
