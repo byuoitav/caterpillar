@@ -120,6 +120,11 @@ func (e *elkFeeder) StartFeeding(capacity int) (chan interface{}, *nerr.E) {
 }
 
 func (e *elkFeeder) run(events []interface{}) {
+
+	defer func() {
+		close(e.eventChannel)
+	}()
+
 	var err *nerr.E
 	log.L.Infof("Starting feeing caterpillar %v. Initial round size %v", e.config.ID, len(events))
 

@@ -1,15 +1,29 @@
 package caterpillar
 
 import (
-	"encoding/gob"
-	"time"
+	"fmt"
 
+	"github.com/byuoitav/caterpillar/caterpillar/catinter"
+	"github.com/byuoitav/caterpillar/caterpillar/test"
 	"github.com/byuoitav/common/nerr"
 )
 
-//Caterpillar returns error and the state that will be passed in as the 'state' variable on the next run of this caterpillar
-type Caterpillar interface {
-	Run(id string, recordCount int, start, end time.Time, GetData func() (records []interface{}, err *nerr.E), state interface{}) (*nerr.E, interface{})
+var caterpillarRegistry map[string]func() (catinter.Caterpillar, *nerr.E)
 
-	BuildDeencoder() gob.Decoder //It's assumed that you'll initialize gob in this case with the interfaces that Data will be used for in your case.
+func init() {
+	caterpillarRegistry = map[string]func() (catinter.Caterpillar, *nerr.E){
+		"joe_test": test.GetCaterpillar,
+	}
+}
+
+//GetCaterpillar .
+func GetCaterpillar(cattype string) (catinter.Caterpillar, *nerr.E) {
+
+	cat, ok := caterpillarRegistry[cattype]
+	if !ok {
+		return nil, nerr.Create(fmt.Sprintf("Unkown caterpillar type %v", cattype), "unkown-type")
+	}
+
+	return cat()
+
 }

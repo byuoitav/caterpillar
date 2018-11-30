@@ -7,7 +7,7 @@ import (
 	"github.com/byuoitav/caterpillar/config"
 	"github.com/byuoitav/caterpillar/hatchery/feeder"
 	"github.com/byuoitav/caterpillar/hatchery/store"
-	"github.com/byuoitav/common/log"
+	"github.com/byuoitav/caterpillar/nydus"
 )
 
 func TestConfig(t *testing.T) {
@@ -58,7 +58,13 @@ func TestSpawnQueen(t *testing.T) {
 		t.FailNow()
 	}
 
-	q := SpawnQueen(c.Caterpillars[0])
+	n, err := nydus.GetNetwork()
+	if err != nil {
+		t.Error(err.Error())
+		t.FailNow()
+	}
+
+	q := SpawnQueen(c.Caterpillars[0], n.GetChannel())
 	t.Log(q)
 }
 
@@ -116,8 +122,6 @@ func TestFeederFeeding(t *testing.T) {
 	}
 	t.Logf("count: %v", count)
 
-	log.SetLevel("debug")
-
 	t.Logf("Starting feeding..")
 	feedchan, err := f.StartFeeding(100)
 	if err != nil {
@@ -132,6 +136,7 @@ func TestFeederFeeding(t *testing.T) {
 		processed++
 	}
 }
+
 func TestFeederBatchFeeding(t *testing.T) {
 	c, err := config.GetConfig()
 	if err != nil {
@@ -158,9 +163,6 @@ func TestFeederBatchFeeding(t *testing.T) {
 	}
 	t.Logf("count: %v", count)
 
-	log.SetLevel("debug")
-	feeder.MaxSize = 100
-
 	t.Logf("Starting feeding..")
 	feedchan, err := f.StartFeeding(100)
 	if err != nil {
@@ -174,4 +176,21 @@ func TestFeederBatchFeeding(t *testing.T) {
 		<-feedchan
 		processed++
 	}
+}
+
+func TestCaterpillarRun(t *testing.T) {
+	feeder.MaxSize = 8000
+	c, err := config.GetConfig()
+	if err != nil {
+		t.Error(err.Error())
+		t.FailNow()
+	}
+	n, err := nydus.GetNetwork()
+	if err != nil {
+		t.Error(err.Error())
+		t.FailNow()
+	}
+
+	q := SpawnQueen(c.Caterpillars[0], n.GetChannel())
+	q.Run()
 }

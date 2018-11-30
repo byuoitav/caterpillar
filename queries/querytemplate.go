@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/byuoitav/common/nerr"
+	"github.com/byuoitav/common/v2/events"
 )
 
 //ELKQueryTemplate shows the template that we use for elk queries. The queries specified for a specific caterpillar wil be unmarshalled into this structure.
@@ -63,10 +64,10 @@ type QueryResponse struct {
 	Hits struct {
 		Total int `json:"total"`
 		Hits  []struct {
-			Index  string      `json:"_index"`
-			Type   string      `json:"_type"`
-			ID     string      `json:"_id"`
-			Source interface{} `json:"_source"`
+			Index  string       `json:"_index"`
+			Type   string       `json:"_type"`
+			ID     string       `json:"_id"`
+			Source events.Event `json:"_source"`
 		} `json:"hits"`
 	} `json:"hits"`
 }
