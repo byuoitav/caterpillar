@@ -77,5 +77,17 @@ func (q Queen) Run() {
 	}
 
 	//Run the caterpillar - this should block until the cateprillar is done chewing through the data.
-	cat.Run(q.config.ID, count, info, q.nydusChannel, feed.StartFeeding)
+	state, err := cat.Run(q.config.ID, count, info, q.nydusChannel, q.config, feed.StartFeeding)
+	if err != nil {
+		log.L.Error(err.Addf("There was an error running caterpillar %v: %v", q.config.ID, err.Error()))
+		log.L.Debugf("%s", err.Stack)
+		return
+	}
+
+	err = store.PutInfo(q.config.ID, state)
+	if err != nil {
+		log.L.Errorf(err.Addf("Couldn't store information for caterpillar %v to info store. Returning.", q.config.ID).Error())
+		log.L.Debugf("%s", err.Stack)
+		return
+	}
 }

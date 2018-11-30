@@ -28,7 +28,7 @@ type BulkRecordHeader struct {
 
 //HeaderIndex .
 type HeaderIndex struct {
-	Index string `json:"_indedx"`
+	Index string `json:"_index"`
 	Type  string `json:"_type"`
 	ID    string `json:"_id,omitempty"`
 }

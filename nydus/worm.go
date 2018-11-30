@@ -35,6 +35,7 @@ func SpawnWorm(entries []BulkRecordEntry) {
 		body = append(body, bb...)
 		body = append(body, newline...)
 	}
+	log.L.Debugf("Sending body: %s", body)
 
 	//we send body
 	resp, er := elk.MakeELKRequest("POST", "/_bulk", body)
@@ -50,7 +51,7 @@ func SpawnWorm(entries []BulkRecordEntry) {
 		return
 	}
 	if eresp.Errors {
-		log.L.Errorf("Errors Received from Worm Bulk Request... %v", resp)
+		log.L.Errorf("Errors Received from Worm Bulk Request... %s", resp)
 	}
 
 	return

@@ -13,6 +13,9 @@
             "must": [{"match": {"generating-system": "ITB-1101-CP1"}}]
           }
         }
+      },
+      "type-config": {
+          "output-index": "caterpillar-test"
       }
     }
   ],

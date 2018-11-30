@@ -8,6 +8,7 @@ import (
 	"github.com/byuoitav/caterpillar/hatchery/feeder"
 	"github.com/byuoitav/caterpillar/hatchery/store"
 	"github.com/byuoitav/caterpillar/nydus"
+	"github.com/byuoitav/common/log"
 )
 
 func TestConfig(t *testing.T) {
@@ -179,6 +180,7 @@ func TestFeederBatchFeeding(t *testing.T) {
 }
 
 func TestCaterpillarRun(t *testing.T) {
+	log.SetLevel("debug")
 	feeder.MaxSize = 8000
 	c, err := config.GetConfig()
 	if err != nil {
@@ -193,4 +195,5 @@ func TestCaterpillarRun(t *testing.T) {
 
 	q := SpawnQueen(c.Caterpillars[0], n.GetChannel())
 	q.Run()
+	time.Sleep(10 * time.Second)
 }
