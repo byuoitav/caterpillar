@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/byuoitav/caterpillar/caterpillar/catinter"
+	"github.com/byuoitav/caterpillar/caterpillar/corestatetime"
 	"github.com/byuoitav/caterpillar/caterpillar/test"
 	"github.com/byuoitav/common/nerr"
 )
@@ -12,7 +13,8 @@ var caterpillarRegistry map[string]func() (catinter.Caterpillar, *nerr.E)
 
 func init() {
 	caterpillarRegistry = map[string]func() (catinter.Caterpillar, *nerr.E){
-		"joe_test": test.GetCaterpillar,
+		"joe_test":        test.GetCaterpillar,
+		"core-state-time": corestatetime.GetCaterpillar,
 	}
 }
 

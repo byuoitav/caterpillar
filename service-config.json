@@ -15,7 +15,28 @@
         }
       },
       "type-config": {
-          "output-index": "caterpillar-test"
+        "output-index": "caterpillar-test"
+      }
+    },
+    {
+      "id": "CoreStateTime",
+      "type": "core-state-time",
+      "index": "av-delta-events*",
+      "interval": "0 * * * * *",
+      "time-field": "timestamp",
+      "max-interval": "400h",
+      "query": {
+        "query": {
+          "bool": {
+            "must": [
+              {"match": {"target-device.roomID": "ITB-1101"}},
+              {"match": {"event-tags": "core-state"}}
+            ]
+          }
+        }
+      },
+      "type-config": {
+        "output-index": "caterpillar-test"
       }
     }
   ],
