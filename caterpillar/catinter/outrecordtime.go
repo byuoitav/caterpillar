@@ -1,12 +1,22 @@
-package corestatetime
+package catinter
 
 import "time"
+
+//recordTypes
+const (
+	Input  = "input"
+	Power  = "power"
+	Blank  = "blank"
+	Volume = "volume"
+	Mute   = "mute"
+)
 
 //MetricsRecord .
 type MetricsRecord struct {
 	StartTime        time.Time `json:"start-time"`
 	EndTime          time.Time `json:"end-time"`
 	ElapsedInSeconds int64     `json:"elapsed-in-seconds"`
+	RecordType       string    `json:"record-type"`
 
 	Device DeviceInfo `json:"device"`
 	Room   RoomInfo   `json:"room"`

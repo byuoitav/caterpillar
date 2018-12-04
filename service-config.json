@@ -24,13 +24,13 @@
       "index": "av-delta-events*",
       "interval": "0 * * * * *",
       "time-field": "timestamp",
-      "max-interval": "400h",
+      "max-interval": "2h",
       "query": {
         "query": {
           "bool": {
             "must": [
-              {"match": {"target-device.roomID": "ITB-1101"}},
-              {"match": {"event-tags": "core-state"}}
+              {"match": {"event-tags": "core-state"}},
+              {"match": {"target-device.deviceID": "ITB-1101-D1"}}
             ]
           }
         }

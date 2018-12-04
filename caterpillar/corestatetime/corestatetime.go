@@ -26,8 +26,8 @@ func init() {
 //Caterpillar  .
 type Caterpillar struct {
 	curState map[string]State //mapping of device to that devices' state .
-	devices  map[string]DeviceInfo
-	rooms    map[string]RoomInfo
+	devices  map[string]catinter.DeviceInfo
+	rooms    map[string]catinter.RoomInfo
 
 	outChan chan nydus.BulkRecordEntry
 	index   string
@@ -42,9 +42,10 @@ type State struct {
 	Muted           bool
 	AudioChangeTime time.Time
 
-	CurInput        string
-	Blanked         bool
-	VideoChangeTime time.Time
+	CurInput          string
+	Blanked           bool
+	VideoChangeTime   time.Time
+	BlankedChangeTime time.Time
 
 	CurPower        string
 	PowerChangeTime time.Time
@@ -55,8 +56,8 @@ func GetCaterpillar() (catinter.Caterpillar, *nerr.E) {
 
 	toReturn := &Caterpillar{
 		rectype:  "metrics",
-		devices:  map[string]DeviceInfo{},
-		rooms:    map[string]RoomInfo{},
+		devices:  map[string]catinter.DeviceInfo{},
+		rooms:    map[string]catinter.RoomInfo{},
 		curState: map[string]State{},
 	}
 
@@ -100,17 +101,17 @@ func (c *Caterpillar) Run(id string, recordCount int, state config.State, outCha
 		return state, err.Addf("Couldn't run caterpillar. Issue with initial data retreival")
 	}
 
-	var curEventTime time.Time
+	//	var curEventTime time.Time
 	for i := range inchan {
 		e, ok := i.(events.Event)
 		if !ok {
 			log.L.Infof("Unkown event format %v", i)
 		}
 		c.processEvent(e)
-		curEventTime = e.Timestamp
+		//	curEventTime = e.Timestamp
 	}
 
-	log.L.Debugf("%v-%v-%v", index, startTime, curEventTime)
+	log.L.Debugf("%v-%v-%v", index, startTime, time.Now())
 
 	return config.State{}, nil
 }
@@ -133,33 +134,49 @@ func (c *Caterpillar) processEvent(e events.Event) {
 			//check to see if the device was on before, if it was we need to generate an event.
 			if cur.CurPower == "on" {
 				//generate a 'time on' event
-				r := MetricsRecord{
-					Power: "on",
+				r := catinter.MetricsRecord{
+					Power:      "on",
+					RecordType: catinter.Power,
 				}
 				c.AddMetaInfoAndSend(cur.PowerChangeTime, e, r)
 
-				if cur.CurInput != "" {
+				if cur.Blanked {
+					//generate a 'time blanked' event.
+					r := catinter.MetricsRecord{
+						Blanked:    true,
+						RecordType: catinter.Blank,
+					}
+					c.AddMetaInfoAndSend(cur.BlankedChangeTime, e, r)
+				} else {
+					r := catinter.MetricsRecord{
+						Blanked:    false,
+						RecordType: catinter.Blank,
+					}
+					c.AddMetaInfoAndSend(cur.BlankedChangeTime, e, r)
+				}
+				if cur.CurInput != "" && !cur.Blanked {
 
 					//generate a 'time on input' event.
-					r := MetricsRecord{
-						Input:     cur.CurInput,
-						InputType: strings.TrimRight(cur.CurInput, "0123456789"),
+					r := catinter.MetricsRecord{
+						Input:      cur.CurInput,
+						RecordType: catinter.Input,
 					}
 					c.AddMetaInfoAndSend(cur.VideoChangeTime, e, r)
 				}
 				if cur.VolumeSet && !cur.Muted {
 					//generate a 'time at volume' event.
-					r := MetricsRecord{
-						Volume:    cur.CurVolume,
-						InputType: strings.TrimRight(cur.CurInput, "0123456789"),
+					r := catinter.MetricsRecord{
+						Volume:     cur.CurVolume,
+						RecordType: catinter.Volume,
 					}
 					c.AddMetaInfoAndSend(cur.VideoChangeTime, e, r)
 
 				}
 				if cur.Muted {
 					//generate a 'time muted' event.
-					r := MetricsRecord{
-						Muted: true,
+					r := catinter.MetricsRecord{
+						Muted:      true,
+						RecordType: catinter.Mute,
 					}
 					c.AddMetaInfoAndSend(cur.AudioChangeTime, e, r)
 				}
@@ -167,10 +184,12 @@ func (c *Caterpillar) processEvent(e events.Event) {
 				cur.CurPower = "standby"
 				cur.PowerChangeTime = e.Timestamp
 				cur.VideoChangeTime = e.Timestamp
+				cur.BlankedChangeTime = e.Timestamp
 				cur.AudioChangeTime = e.Timestamp
 			} else if cur.CurPower == "" {
 				//first event, start.
 				cur.PowerChangeTime = e.Timestamp
+				cur.BlankedChangeTime = e.Timestamp
 				cur.CurPower = "on"
 			}
 
@@ -179,12 +198,14 @@ func (c *Caterpillar) processEvent(e events.Event) {
 		if e.Value == "on" {
 			if cur.CurPower == "standby" {
 				//we need to generate a 'time standby' record.
-				r := MetricsRecord{
-					Power: "standby",
+				r := catinter.MetricsRecord{
+					Power:      "standby",
+					RecordType: catinter.Power,
 				}
 				c.AddMetaInfoAndSend(cur.PowerChangeTime, e, r)
 
 				cur.PowerChangeTime = e.Timestamp
+				cur.BlankedChangeTime = e.Timestamp
 				cur.VideoChangeTime = e.Timestamp
 				cur.AudioChangeTime = e.Timestamp
 
@@ -193,6 +214,7 @@ func (c *Caterpillar) processEvent(e events.Event) {
 				log.L.Debugf("Processing power event: value: %v", e.Value)
 				//first event, start.
 				cur.PowerChangeTime = e.Timestamp
+				cur.BlankedChangeTime = e.Timestamp
 				cur.CurPower = "on"
 			}
 
@@ -202,7 +224,7 @@ func (c *Caterpillar) processEvent(e events.Event) {
 		if !cur.Blanked {
 			if cur.CurInput != e.Value && cur.CurInput != "" {
 				//it's a change
-				r := MetricsRecord{Input: cur.CurInput}
+				r := catinter.MetricsRecord{Input: cur.CurInput, RecordType: catinter.Input}
 				c.AddMetaInfoAndSend(cur.VideoChangeTime, e, r)
 
 				cur.CurInput = e.Value
@@ -227,30 +249,88 @@ func (c *Caterpillar) processEvent(e events.Event) {
 		if v != cur.Blanked {
 			//it's a change
 			if v == true {
-				//we're blanking, set a time on input
-				r := MetricsRecord{Input: cur.CurInput}
+				//we're blanking, set a time on input, as well as a time on unblanked
+				r := catinter.MetricsRecord{Input: cur.CurInput, RecordType: catinter.Input}
 				c.AddMetaInfoAndSend(cur.VideoChangeTime, e, r)
+
+				r = catinter.MetricsRecord{Blanked: false, RecordType: catinter.Blank}
+				c.AddMetaInfoAndSend(cur.BlankedChangeTime, e, r)
 
 				cur.Blanked = v
 				cur.VideoChangeTime = e.Timestamp
+				cur.BlankedChangeTime = e.Timestamp
 
 			} else {
 				//we're unblanking, send a time on blank event
-				r := MetricsRecord{Blanked: cur.Blanked}
-				c.AddMetaInfoAndSend(cur.VideoChangeTime, e, r)
+				r := catinter.MetricsRecord{Blanked: cur.Blanked, RecordType: catinter.Blank}
+				c.AddMetaInfoAndSend(cur.BlankedChangeTime, e, r)
 
 				cur.Blanked = v
 				cur.VideoChangeTime = e.Timestamp
+				cur.BlankedChangeTime = e.Timestamp
 			}
 		}
 		if cur.VideoChangeTime.Equal(time.Time{}) {
 			//first time, set
 			cur.VideoChangeTime = e.Timestamp
 		}
+		if cur.BlankedChangeTime.Equal(time.Time{}) {
+			//first time, set
+			cur.BlankedChangeTime = e.Timestamp
+		}
 
 	case "volume":
-	case "muted":
+		v, err := strconv.Atoi(e.Value)
+		if err != nil {
+			log.L.Errorf("couldn't parse volume event value %v", e.Value)
+			return
+		}
+		if cur.Muted {
+			//just set the current state
+			cur.CurVolume = v
+		} else {
+			if cur.CurVolume != v {
+				//it's a change
+				r := catinter.MetricsRecord{Volume: cur.CurVolume, RecordType: catinter.Volume}
+				c.AddMetaInfoAndSend(cur.AudioChangeTime, e, r)
 
+				cur.CurVolume = v
+				cur.AudioChangeTime = e.Timestamp
+			}
+		}
+		if cur.AudioChangeTime.Equal(time.Time{}) {
+			//first time, set
+			cur.AudioChangeTime = e.Timestamp
+		}
+	case "muted":
+		v, err := strconv.ParseBool(e.Value)
+		if err != nil {
+			log.L.Errorf("couldn't parse muted event value %v", e.Value)
+			return
+		}
+		if v != cur.Muted {
+			//it's a change
+			if v == true {
+				//we're blanking, set a time on input
+				r := catinter.MetricsRecord{Volume: cur.CurVolume, RecordType: catinter.Volume}
+				c.AddMetaInfoAndSend(cur.AudioChangeTime, e, r)
+
+				cur.Muted = v
+				cur.AudioChangeTime = e.Timestamp
+
+			} else {
+				//we're unblanking, send a time on blank event
+				r := catinter.MetricsRecord{Muted: cur.Muted, RecordType: catinter.Mute}
+				c.AddMetaInfoAndSend(cur.AudioChangeTime, e, r)
+
+				cur.Muted = v
+				cur.AudioChangeTime = e.Timestamp
+			}
+		}
+		if cur.AudioChangeTime.Equal(time.Time{}) {
+			//first time, set
+			cur.AudioChangeTime = e.Timestamp
+		}
 	}
 
 	//set back the state.
@@ -259,20 +339,30 @@ func (c *Caterpillar) processEvent(e events.Event) {
 }
 
 //AddTimeFields .
-func AddTimeFields(start, end time.Time, r *MetricsRecord) {
+func AddTimeFields(start, end time.Time, r *catinter.MetricsRecord) {
 	r.StartTime = start
 	r.EndTime = end
 	r.ElapsedInSeconds = int64((end.Sub(start)) / time.Second)
 }
 
 //AddMetaInfoAndSend .
-func (c *Caterpillar) AddMetaInfoAndSend(startTime time.Time, e events.Event, r MetricsRecord) *nerr.E {
+func (c *Caterpillar) AddMetaInfoAndSend(startTime time.Time, e events.Event, r catinter.MetricsRecord) *nerr.E {
 
-	r.Device = DeviceInfo{ID: e.TargetDevice.DeviceID}
-	r.Room = RoomInfo{ID: e.TargetDevice.RoomID}
+	r.Device = catinter.DeviceInfo{ID: e.TargetDevice.DeviceID}
+	r.Room = catinter.RoomInfo{ID: e.TargetDevice.RoomID}
 
 	if dev, ok := c.devices[r.Device.ID]; ok {
 		r.Device = dev
+		//check if it's an input deal
+		if r.RecordType == catinter.Input {
+			if indev, ok := c.devices[r.Input]; ok {
+				r.InputType = indev.DeviceType
+			} else {
+
+				r.InputType = strings.TrimRight(r.Input, "1234567890")
+			}
+		}
+
 	} else {
 		err := nerr.Create(fmt.Sprintf("unkown device %v", r.Device.ID), "invalid-device")
 		log.L.Errorf("%v", err.Error())
@@ -288,7 +378,7 @@ func (c *Caterpillar) AddMetaInfoAndSend(startTime time.Time, e events.Event, r 
 	}
 
 	AddTimeFields(startTime, e.Timestamp, &r)
-	c.wrapAndSend(r)
+	c.WrapAndSend(r)
 
 	return nil
 }
@@ -306,7 +396,7 @@ func (c *Caterpillar) GetDeviceAndRoomInfo() *nerr.E {
 
 	for i := range devs {
 		log.L.Debugf("%v", devs[i].ID)
-		tmp := DeviceInfo{
+		tmp := catinter.DeviceInfo{
 			ID:         devs[i].ID,
 			DeviceType: devs[i].Type.ID,
 			Tags:       devs[i].Tags,
@@ -330,7 +420,7 @@ func (c *Caterpillar) GetDeviceAndRoomInfo() *nerr.E {
 
 	log.L.Infof("Initializing room list with %v rooms", len(rooms))
 	for i := range rooms {
-		c.rooms[rooms[i].ID] = RoomInfo{
+		c.rooms[rooms[i].ID] = catinter.RoomInfo{
 			ID:              rooms[i].ID,
 			Tags:            rooms[i].Tags,
 			DeploymentGroup: rooms[i].Designation,
@@ -340,8 +430,8 @@ func (c *Caterpillar) GetDeviceAndRoomInfo() *nerr.E {
 	return nil
 }
 
-//wrapAndSend .
-func (c *Caterpillar) wrapAndSend(r MetricsRecord) {
+//WrapAndSend .
+func (c *Caterpillar) WrapAndSend(r catinter.MetricsRecord) {
 
 	log.L.Debugf("Generated record: %v", r)
 
