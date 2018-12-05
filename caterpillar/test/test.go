@@ -105,3 +105,8 @@ func (c *Caterpillar) RegisterGobStructs() {
 		gob.Register(DataStruct{})
 	})
 }
+
+//WrapAndSend .
+func (c *Caterpillar) WrapAndSend(r catinter.MetricsRecord) {
+	log.L.Debugf("Generated record: %v", r)
+}

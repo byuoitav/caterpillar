@@ -1,4 +1,4 @@
-package j
+package corestatetime
 
 import (
 	"encoding/gob"
@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/byuoitav/caterpillar/caterpillar/catinter"
+	ci "github.com/byuoitav/caterpillar/caterpillar/catinter"
 	sm "github.com/byuoitav/caterpillar/caterpillar/statemachine"
 	"github.com/byuoitav/caterpillar/config"
 	"github.com/byuoitav/caterpillar/nydus"
@@ -18,25 +18,103 @@ import (
 
 //MachineCaterpillar .
 type MachineCaterpillar struct {
-	Machine *statemachine.Machine
-	outChan chan nydus.BullkRecordEntry
+	Machine *sm.Machine
+	outChan chan nydus.BulkRecordEntry
+	state   config.State
+
+	rectype string
+	devices map[string]ci.DeviceInfo
+	rooms   map[string]ci.RoomInfo
+
+	curState map[string]State
+	index    string
 
 	GobRegisterOnce sync.Once
+}
+
+//True for pointer puposes
+var True = true
+
+//False for pointer puposes
+var False = false
+
+var location *time.Location
+
+func init() {
+	var er error
+	location, er = time.LoadLocation("America/Denver")
+	if er != nil {
+		log.L.Fatalf("Couldn't load timezone: %v", er.Error())
+	}
+}
+
+//GetMachineCaterpillar .
+func GetMachineCaterpillar() (ci.Caterpillar, *nerr.E) {
+
+	toReturn := &MachineCaterpillar{
+		rectype:  "metrics",
+		devices:  map[string]ci.DeviceInfo{},
+		rooms:    map[string]ci.RoomInfo{},
+		curState: map[string]State{},
+	}
+
+	var err *nerr.E
+	toReturn.devices, toReturn.rooms, err = GetDeviceAndRoomInfo()
+	if err != nil {
+		return toReturn, err.Addf("Couldn't initialize corestatetime caterpillar.")
+	}
+
+	return toReturn, nil
 }
 
 //Run .
 func (c *MachineCaterpillar) Run(id string, recordCount int, state config.State, outChan chan nydus.BulkRecordEntry, cnfg config.Caterpillar, GetData func(int) (chan interface{}, *nerr.E)) (config.State, *nerr.E) {
 
+	index, ok := cnfg.TypeConfig["output-index"]
+	if !ok {
+		return state, nerr.Create(fmt.Sprintf("Missing config item for Caterpillar type %v. Need output-index", cnfg.Type), "invalid-config")
+	}
+
+	c.index = index
+	c.state = state
+	c.outChan = outChan
+	var err *nerr.E
+
+	c.Machine, err = c.buildStateMachine()
+
+	if err != nil {
+		return state, err.Addf("Couldn't run machinecaterepillar")
+	}
+
+	inchan, err := GetData(1000)
+	if err != nil {
+		return state, err.Addf("Couldn't run machinecaterepillar")
+	}
+	for i := range inchan {
+		if e, ok := i.(events.Event); ok {
+			err = c.Machine.ProcessEvent(e)
+			if err != nil {
+				log.L.Errorf("Error procssing event: %v", err.Error())
+			}
+		} else {
+			log.L.Warnf("Unkown type in channel %v", i)
+		}
+	}
+
+	return config.State{}, nil
+}
+
+func (c *MachineCaterpillar) buildStateMachine() (*sm.Machine, *nerr.E) {
+
 	Nodes := map[string]sm.Node{}
 	//definitions of our state machine.
 	Nodes["start"] = sm.Node{
 		ID: "start",
-		sm.Transitions: []sm.Transition{
+		Transitions: []sm.Transition{
 			sm.Transition{
 				ID:           "initial-transition",
 				TriggerKey:   "power",
 				TriggerValue: "on",
-				Store:        PowerOnStore,
 				Destination:  "poweron",
 			},
 		},
@@ -44,16 +122,14 @@ func (c *MachineCaterpillar) Run(id string, recordCount int, state config.State,
 
 	Nodes["poweron"] = sm.Node{
 		ID: "poweron",
-		sm.Transitions: []sm.Transition{
+		Transitions: []sm.Transition{
 			sm.Transition{
 				TriggerKey:  "input",
-				Store:       InputStore,
 				Destination: "inputactive",
 			},
 			sm.Transition{
 				TriggerKey:   "blanked",
 				TriggerValue: "true",
-				Store:        EnterBlank,
 				Destination:  "blank",
 			},
 			sm.Transition{
@@ -62,137 +138,158 @@ func (c *MachineCaterpillar) Run(id string, recordCount int, state config.State,
 				Destination:  "powerstandby",
 			},
 		},
+		Enter: PowerOnStore,
 	}
 
 	Nodes["inputactive"] = sm.Node{
 		ID: "inputactive",
-		sm.Transitions: []sm.Transition{
+		Transitions: []sm.Transition{
 			sm.Transition{
 				TriggerKey:  "input",
 				Destination: "inputactive",
 			},
 			sm.Transition{
-				TriggerKey:  "blanked",
-				TriggerKey:  "true",
-				Store:       EnterBlank,
-				Destination: "blank",
+				TriggerKey:   "blanked",
+				TriggerValue: "true",
+				Destination:  "blank",
 			},
 			sm.Transition{
-				TriggerKey:  "power",
-				TriggerKey:  "standby",
-				Before:      BuildUnblankedRecord,
+				TriggerKey:   "power",
+				TriggerValue: "standby",
+				Actions: []func(map[string]interface{}, events.Event) ([]ci.MetricsRecord, *nerr.E){
+					c.BuildUnblankedRecord,
+				},
 				Destination: "powerstandby",
 			},
 		},
-		Exit: BuildInputRecord,
+		Exit:  c.BuildInputRecord,
+		Enter: InputStore,
 	}
 
 	Nodes["blank"] = sm.Node{
 		ID: "blank",
-		sm.Transitions: []sm.Transition{
+		Transitions: []sm.Transition{
 			sm.Transition{
-				TriggerKey:  "blank",
+				TriggerKey:  "input",
 				Destination: "blank",
-				Store:       InputStore,
 			},
 			sm.Transition{
-				TriggerKey:  "unblank",
-				Destination: "inputactive",
-				Before:      BuildBlankedRecord,
+				TriggerKey:   "blanked",
+				TriggerValue: "false",
+				Destination:  "inputactive",
 			},
 			sm.Transition{
-				TriggerKey:  "power",
-				TriggerKey:  "standby",
-				Destination: "powerstandby",
-				Before:      BuildBlankedRecord,
+				TriggerKey:   "power",
+				TriggerValue: "standby",
+				Destination:  "powerstandby",
 			},
 		},
+		Enter: c.EnterBlank,
+		Exit:  c.BuildBlankedRecord,
 	}
 
 	Nodes["powerstandby"] = sm.Node{
 		ID: "powerstandby",
-		sm.Transitions: []sm.Transition{
+		Transitions: []sm.Transition{
 			sm.Transition{
 				TriggerKey:  "power",
-				Destination: "on",
+				Destination: "poweron",
 			},
 		},
-		Enter: StandbyEnter,
-		Exit:  StandbyExit,
+		Enter: c.StandbyEnter,
+		Exit:  c.StandbyExit,
 	}
 
-	return config.State{}, nil
+	return sm.BuildStateMachine("deviceid", Nodes, "start", c.state, c)
 }
 
 //StandbyEnter .
-func (c *MachineCaterpillar) StandbyEnter(state map[string]interface{}, e events.Event) (catinter.MetricsRecord, *nerr.E) {
+func (c *MachineCaterpillar) StandbyEnter(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
 	//generate a 'time power on' event
 
-	toReturn := catinter.MetricsRecord{Power: "on"}
+	toReturn := ci.MetricsRecord{
+		Power:      "on",
+		RecordType: ci.Power,
+	}
 
 	startTime, ok := state["power-set"].(time.Time)
 	if !ok {
-		return toReturn, nerr.Create("power-set not set to time.Time", "invalid-state")
+		return []ci.MetricsRecord{}, nerr.Create("power-set not set to time.Time", "invalid-state")
 	}
 	state["power"] = "standby"
 	state["power-set"] = e.Timestamp
 
-	return c.AddMetaInfo(startTime, e, toReturn)
+	rec, err := c.AddMetaInfo(startTime, e, toReturn)
+	return []ci.MetricsRecord{rec}, err
 }
 
 //StandbyExit .
-func (c *MachineCaterpillar) StandbyExit(state map[string]interface{}, e events.Event) (catinter.MetricsRecord, *nerr.E) {
+func (c *MachineCaterpillar) StandbyExit(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
 
 	//generate a 'time power standby' event
-	toReturn := catinter.MetricsRecord{Power: "standby"}
+	toReturn := ci.MetricsRecord{
+		Power:      "standby",
+		RecordType: ci.Power,
+	}
 
 	startTime, ok := state["power-set"].(time.Time)
 	if !ok {
-		return toReturn, nerr.Create("power-set not set to time.Time", "invalid-state")
+		return []ci.MetricsRecord{}, nerr.Create("power-set not set to time.Time", "invalid-state")
 	}
 	state["power"] = "on"
 	state["power-set"] = e.Timestamp
 
-	return c.AddMetaInfo(startTime, e, toReturn)
+	rec, err := c.AddMetaInfo(startTime, e, toReturn)
+	return []ci.MetricsRecord{rec}, err
 }
 
 //BuildBlankedRecord .
-func (c *MachineCaterpillar) BuildBlankedRecord(state map[string]interface{}, e events.Event) (catinter.MetricsRecord, *nerr.E) {
+func (c *MachineCaterpillar) BuildBlankedRecord(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
 
 	//generate the event
-	toReturn := catinter.MetricsRecord{Blanked: true}
+	toReturn := ci.MetricsRecord{
+		Blanked:    &True,
+		RecordType: ci.Blank,
+	}
 
 	startTime, ok := state["blank-set"].(time.Time)
 	if !ok {
-		return toReturn, nerr.Create("blank-set not set to time.Time", "invalid-state")
+		return []ci.MetricsRecord{}, nerr.Create("blank-set not set to time.Time", "invalid-state")
 	}
 
 	state["blanked"] = false
 	state["input-set"] = e.Timestamp
 	state["blank-set"] = e.Timestamp
 
-	return c.AddMetaInfo(startTime, e, toReturn)
+	rec, err := c.AddMetaInfo(startTime, e, toReturn)
+	return []ci.MetricsRecord{rec}, err
 }
 
 //BuildUnblankedRecord .
-func (c *MachineCaterpillar) BuildUnblankedRecord(state map[string]interface{}, e events.Event) (catinter.MetricsRecord, *nerr.E) {
+func (c *MachineCaterpillar) BuildUnblankedRecord(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
 
 	//generate the event
-	toReturn := catinter.MetricsRecord{Blanked: false}
+	toReturn := ci.MetricsRecord{
+		Blanked:    &False,
+		RecordType: ci.Blank,
+	}
 
 	startTime, ok := state["blank-set"].(time.Time)
 	if !ok {
-		return toReturn, nerr.Create("blank-set not set to time.Time", "invalid-state")
+		return []ci.MetricsRecord{}, nerr.Create("blank-set not set to time.Time", "invalid-state")
 	}
 
-	return c.AddMetaInfo(startTime, e, toReturn)
+	rec, err := c.AddMetaInfo(startTime, e, toReturn)
+	return []ci.MetricsRecord{rec}, err
 }
 
 //BuildInputRecord .
-func (c *MachineCaterpillar) BuildInputRecord(state map[string]interface{}, e events.Event) (catinter.MetricsRecord, *nerr.E) {
+func (c *MachineCaterpillar) BuildInputRecord(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
 
 	//generate the event
-	toReturn := catinter.MetricsRecord{}
+	toReturn := ci.MetricsRecord{
+		RecordType: ci.Input,
+	}
 	var err *nerr.E
 
 	//check to see if it's an input change
@@ -202,95 +299,84 @@ func (c *MachineCaterpillar) BuildInputRecord(state map[string]interface{}, e ev
 		curInputStr, ok = curInput.(string)
 		if ok {
 			if curInputStr == e.Value {
-				return catinter.MetricsRecord{}, nil
+				return []ci.MetricsRecord{}, nil
 			}
-
 			toReturn.Input = curInputStr
-			startTime, ok := state["input-store"].(time.Time)
-
-			toReturn, err = c.AddMetaInfo(starTime, e, &toReturn)
-			if err != nil {
-				return toReturn, err
+			if startTime, ok := state["input-set"].(time.Time); ok {
+				toReturn, err = c.AddMetaInfo(startTime, e, toReturn)
+				if err != nil {
+					return []ci.MetricsRecord{}, err
+				}
+				return []ci.MetricsRecord{toReturn}, nil
 			}
-		} else {
-			//unkown value stored
-			return toReturn, nerr.Create(fmt.Sprintf("Invlaid type stored in input: %v", curInput), "invalid-state")
+			return []ci.MetricsRecord{}, nerr.Create(fmt.Sprintf("input-store not set to time.Time, value %v", state["input-store"]), "invalid-state")
 		}
-		if !ok {
-			return toReturn, nerr.Create("Power-store not set to time.Time", "invalid-state")
-		}
+		return []ci.MetricsRecord{}, nerr.Create(fmt.Sprintf("Invlaid type stored in input: %v", curInput), "invalid-state")
+
+		//unkown value stored
 	}
-
-	return toReturn, nil
-}
-
-//EnterStandby  .
-func (c *MachineCaterpillar) EnterStandby(state map[string]interface{}, e events.Event) (catinter.MetricsRecord, *nerr.E) {
-
-	//generate the event
-	toReturn := catinter.MetricsRecord{Power: "on"}
-
-	startTime, ok := state["power-set"].(time.Time)
-	if !ok {
-		return toReturn, nerr.Create("Power-set not set to time.Time", "invalid-state")
-	}
-
-	//Store the new power state
-	state["power-set"] = e.Timstamp
-	state["power"] = "standby"
-
-	return c.AddMetaInfo(starTime, e, toReturn)
+	return []ci.MetricsRecord{}, nerr.Create("Cannot create input record with input state not set.", "invalid-state")
 }
 
 //EnterBlank .
-func EnterBlank(state map[string]interface{}, e events.Event) (catinter.MettricsRecord, *nerr.E) {
+func (c *MachineCaterpillar) EnterBlank(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
+	if e.Key != "blanked" {
+		return []ci.MetricsRecord{}, nil
+	}
 
 	//generate the 'time unblanked' event
-	toReturn := catinter.MetricsRecord{Blanked: false}
+	toReturn := ci.MetricsRecord{
+		Blanked:    &False,
+		RecordType: ci.Blank,
+	}
 
 	startTime, ok := state["blank-set"].(time.Time)
 	if !ok {
-		return toReturn, nerr.Create("blank-set not set to time.Time", "invalid-state")
+		return []ci.MetricsRecord{}, nerr.Create("blank-set not set to time.Time", "invalid-state")
 	}
 
 	//Store the new power state
 	state["blank-set"] = e.Timestamp
 	state["blanked"] = true
 
-	return c.AddMetaInfo(starTime, e, toReturn)
+	rec, err := c.AddMetaInfo(startTime, e, toReturn)
+	return []ci.MetricsRecord{rec}, err
 }
 
 //UnBlankStore .
-func UnBlankStore(state map[string]interface{}, e events.Event) {
+func UnBlankStore(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
 	state["blank-set"] = e.Timestamp
 	state["blanked"] = false
+	return []ci.MetricsRecord{}, nil
 }
 
 //InputStore .
-func InputStore(state map[string]interface{}, e events.Event) {
+func InputStore(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
 	state["input-set"] = e.Timestamp
 	state["input"] = e.Value
+	return []ci.MetricsRecord{}, nil
 }
 
 //PowerOnStore .
-func PowerOnStore(state map[string]interface{}, e events.Event) {
+func PowerOnStore(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
 	state["power-set"] = e.Timestamp
 	state["blank-set"] = e.Timestamp
 	state["input-set"] = e.Timestamp
 	state["power"] = "on"
 	state["blanked"] = false
+	return []ci.MetricsRecord{}, nil
 }
 
 //AddMetaInfo .
-func (c *MachineCaterpillar) AddMetaInfo(startTime time.Time, e events.Event, r catinter.MetricsRecord) (catinter.MetricsRecord, *nerr.E) {
+func (c *MachineCaterpillar) AddMetaInfo(startTime time.Time, e events.Event, r ci.MetricsRecord) (ci.MetricsRecord, *nerr.E) {
 
-	r.Device = catinter.DeviceInfo{ID: e.TargetDevice.DeviceID}
-	r.Room = catinter.RoomInfo{ID: e.TargetDevice.RoomID}
+	r.Device = ci.DeviceInfo{ID: e.TargetDevice.DeviceID}
+	r.Room = ci.RoomInfo{ID: e.TargetDevice.RoomID}
 
 	if dev, ok := c.devices[r.Device.ID]; ok {
 		r.Device = dev
 		//check if it's an input deal
-		if r.RecordType == catinter.Input {
+		if r.RecordType == ci.Input {
 			if indev, ok := c.devices[r.Input]; ok {
 				r.InputType = indev.DeviceType
 			} else {
@@ -323,4 +409,33 @@ func (c *MachineCaterpillar) RegisterGobStructs() {
 	c.GobRegisterOnce.Do(func() {
 		gob.Register(sm.MachineState{})
 	})
+}
+
+//WrapAndSend .
+func (c *MachineCaterpillar) WrapAndSend(r ci.MetricsRecord) {
+
+	printRecord(r)
+
+	c.outChan <- nydus.BulkRecordEntry{
+		Header: nydus.BulkRecordHeader{
+			Index: nydus.HeaderIndex{
+				Index: c.index,
+				Type:  c.rectype,
+			},
+		},
+		Body: r,
+	}
+}
+
+func printRecord(r ci.MetricsRecord) {
+
+	switch r.RecordType {
+	case "input":
+		log.L.Debugf("Generating %v %v Time %v Starting %v Ending %v", r.RecordType, r.Input, r.ElapsedInSeconds, r.StartTime.In(location).Format("15:04:05 01-02"), r.EndTime.In(location).Format("15:04:05 01-02"))
+	case "blank":
+		log.L.Debugf("Generating %v %v Time %v Starting %v Ending %v", r.RecordType, *r.Blanked, r.ElapsedInSeconds, r.StartTime.In(location).Format("15:04:05 01-02"), r.EndTime.In(location).Format("15:04:05 01-02"))
+	case "power":
+		log.L.Debugf("Generating %v %v Time %v Starting %v Ending %v", r.RecordType, r.Power, r.ElapsedInSeconds, r.StartTime.In(location).Format("15:04:05 01-02"), r.EndTime.In(location).Format("15:04:05 01-02"))
+	}
+
 }

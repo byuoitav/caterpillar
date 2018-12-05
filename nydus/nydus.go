@@ -3,7 +3,6 @@ package nydus
 import (
 	"time"
 
-	"github.com/byuoitav/common/log"
 	"github.com/byuoitav/common/nerr"
 )
 
@@ -75,7 +74,7 @@ func (n *Network) run() {
 			continue
 
 		case record := <-n.inChannel:
-			log.L.Infof("Addding to buffer.")
+			//			log.L.Infof("Addding to buffer.")
 
 			n.curBuffer = append(n.curBuffer, record)
 

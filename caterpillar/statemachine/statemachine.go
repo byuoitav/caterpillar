@@ -15,12 +15,11 @@ const (
 )
 
 //BuildStateMachine ScopeType corresponds to a field in the event to use as the 'key' for the statemachine. Currently we only accept 'deviceid'
-func BuildStateMachine(scopeKey string, nodes map[string]Node, startNode string, outChan chan nydus.BulkRecordHeader, state config.State, cat catinter.Caterpillar) (Machine, *nerr.E) {
+func BuildStateMachine(scopeKey string, nodes map[string]Node, startNode string, state config.State, cat catinter.Caterpillar) (*Machine, *nerr.E) {
 
 	m := Machine{
 		ScopeKey:    scopeKey,
 		Nodes:       nodes,
-		OutChan:     outChan,
 		StartNode:   startNode,
 		CurStates:   map[string]*MachineState{},
 		Caterpillar: cat,
@@ -35,7 +34,7 @@ func BuildStateMachine(scopeKey string, nodes map[string]Node, startNode string,
 		}
 	}
 
-	return m, nil
+	return &m, nil
 }
 
 //Machine .
@@ -59,8 +58,8 @@ type MachineState struct {
 //Node .
 type Node struct {
 	ID          string //must be unique .
-	Enter       func(map[string]interface{}, events.Event) (cst.MetricsRecord, *nerr.E)
-	Exit        func(map[string]interface{}, events.Event) (cst.MetricsRecord, *nerr.E)
+	Enter       func(map[string]interface{}, events.Event) ([]cst.MetricsRecord, *nerr.E)
+	Exit        func(map[string]interface{}, events.Event) ([]cst.MetricsRecord, *nerr.E)
 	Transitions []Transition //if match multiple transitions, the first declared will be taken.
 }
 
@@ -70,10 +69,8 @@ type Transition struct {
 	TriggerKey   string      //check for the event.key
 	TriggerValue interface{} //Corresponds to event.Value. Either a concrete value (string), or if you want to tigger on a == or != relationship with a store value, you can use a TransitionTrigger value.
 
-	Store func(map[string]interface{}, events.Event) //things to store.
+	Actions []func(map[string]interface{}, events.Event) ([]cst.MetricsRecord, *nerr.E) //runs before ANY transitionbbbb
 
-	Before      func(map[string]interface{}, events.Event) (cst.MetricsRecord, *nerr.E) //runs before ANY transitionbbbb
-	After       func(map[string]interface{}, events.Event) (cst.MetricsRecord, *nerr.E) //runs after ANY transition
 	Destination string
 }
 

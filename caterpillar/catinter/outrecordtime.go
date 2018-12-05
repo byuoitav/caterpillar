@@ -13,34 +13,34 @@ const (
 
 //MetricsRecord .
 type MetricsRecord struct {
-	StartTime        time.Time `json:"start-time"`
-	EndTime          time.Time `json:"end-time"`
-	ElapsedInSeconds int64     `json:"elapsed-in-seconds"`
-	RecordType       string    `json:"record-type"`
+	StartTime        time.Time `json:"start-time,omitempty"`
+	EndTime          time.Time `json:"end-time,omitempty"`
+	ElapsedInSeconds int64     `json:"elapsed-in-seconds,omitempty"`
+	RecordType       string    `json:"record-type,omitempty"`
 
-	Device DeviceInfo `json:"device"`
-	Room   RoomInfo   `json:"room"`
+	Device DeviceInfo `json:"device,omitempty"`
+	Room   RoomInfo   `json:"room,omitempty"`
 
-	Input     string `json:"input"`
-	InputType string `json:"input-type"`
+	Input     string `json:"input,omitempty"`
+	InputType string `json:"input-type,omitempty"`
 
-	Volume  int    `json:"volume"`
-	Blanked bool   `json:"blanked"`
-	Muted   bool   `json:"muted"`
-	Power   string `json:"power"`
+	Volume  *int   `json:"volume,omitempty"`
+	Blanked *bool  `json:"blanked,omitempty"`
+	Muted   *bool  `json:"muted,omitempty"`
+	Power   string `json:"power,omitempty"`
 }
 
 //DeviceInfo .
 type DeviceInfo struct {
-	ID          string   `json:"id"`
-	DeviceType  string   `json:"device-type"`
-	DeviceRoles []string `json:"device-roles"`
-	Tags        []string `json:"tags"`
+	ID          string   `json:"id,omitempty"`
+	DeviceType  string   `json:"device-type,omitempty"`
+	DeviceRoles []string `json:"device-roles,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 //RoomInfo .
 type RoomInfo struct {
-	ID              string   `json:"id"`
-	DeploymentGroup string   `json:"deployment-group"`
-	Tags            []string `json:"tags"`
+	ID              string   `json:"id,omitempty"`
+	DeploymentGroup string   `json:"deployment-group,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
 }

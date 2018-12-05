@@ -20,17 +20,17 @@
     },
     {
       "id": "CoreStateTime",
-      "type": "core-state-time",
+      "type": "core-state-time-machine",
       "index": "av-delta-events*",
       "interval": "0 * * * * *",
       "time-field": "timestamp",
-      "max-interval": "2h",
+      "max-interval": "48h",
       "query": {
         "query": {
           "bool": {
             "must": [
               {"match": {"event-tags": "core-state"}},
-              {"match": {"target-device.deviceID": "ITB-1101-D1"}}
+              {"match": {"target-device.deviceID": "ITB-1101-D2"}}
             ]
           }
         }

@@ -2,6 +2,7 @@ package statemachine
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/byuoitav/common/log"
 	"github.com/byuoitav/common/nerr"
@@ -10,20 +11,34 @@ import (
 
 //ProcessEvent .
 func (m *Machine) ProcessEvent(e events.Event) *nerr.E {
+	location, er := time.LoadLocation("America/Denver")
+	if er != nil {
+		log.L.Fatalf("Couldn't load timezone: %v", er.Error())
+	}
 
 	k, err := GetScope(m.ScopeKey, e)
 	if err != nil {
 		return err.Add("Couldn't process event.")
 	}
-	cur := m.CurStates[k]
+	cur, ok := m.CurStates[k]
+	if !ok {
+		tmp := MachineState{
+			CurNode:    m.StartNode,
+			ValueStore: map[string]interface{}{},
+		}
+		cur = &tmp
+		m.CurStates[k] = cur
+	}
 
+	log.L.Debugf("Current state %v", cur.CurNode)
+	log.L.Debugf("Processing event %v, %v, %v", e.Key, e.Value, e.Timestamp.In(location).Format("15:04:05 01-02"))
 	//check the transitions from the current state of m
 	curNode, ok := m.Nodes[cur.CurNode]
 	if !ok {
 		return nerr.Create("unkown current node: %v", cur.CurNode)
 	}
 
-	for _, t := range curNode.Transitions {
+	for i, t := range curNode.Transitions {
 		if e.Key != t.TriggerKey {
 			continue
 		}
@@ -54,8 +69,24 @@ func (m *Machine) ProcessEvent(e events.Event) *nerr.E {
 				if e.Value != v {
 					continue
 				}
+				if len(t.ID) > 0 {
+					log.L.Debugf("Transitioning on %v", t.ID)
+				} else {
+					log.L.Debugf("Transitioning on transition %v from state %v", i, curNode.ID)
+				}
 				//otherwise we transition
-				m.transition(e, t, cur)
+				err := m.transition(e, t, cur)
+				if err != nil {
+					if len(t.ID) > 0 {
+						err = err.Addf("Error with transition %v", t.ID)
+					} else {
+						err = err.Addf("Error with transition number %v for state %v", i, curNode.ID)
+					}
+					log.L.Errorf("%v", err.Error())
+					return err
+				}
+
+				return nil
 
 			} else {
 				log.L.Errorf("Unkown triggerValue %v", t.TriggerValue)
@@ -72,50 +103,39 @@ func (m *Machine) ProcessEvent(e events.Event) *nerr.E {
 
 //transition
 func (m *Machine) transition(e events.Event, t Transition, CurState *MachineState) *nerr.E {
+
 	//do node exit
-
 	if m.Nodes[CurState.CurNode].Exit != nil {
-		record, err := m.Nodes[CurState.CurNode].Exit(CurState.ValueStore, e)
+		records, err := m.Nodes[CurState.CurNode].Exit(CurState.ValueStore, e)
 		if err != nil {
 			err.Add("Couldn't generate record")
 			return err
 		}
-		m.Caterpillar.WrapAndSend(record)
+		for i := range records {
+			m.Caterpillar.WrapAndSend(records[i])
+		}
 	}
 
-	if t.Before != nil {
-		//do before
-		record, err := t.Before(CurState.ValueStore, e)
+	for i := range t.Actions {
+		records, err := t.Actions[i](CurState.ValueStore, e)
 		if err != nil {
 			err.Add("Couldn't generate record")
 			return err
 		}
-
-		m.Caterpillar.WrapAndSend(record)
-	}
-
-	if t.Store != nil {
-		//store values
-		t.Store(CurState.ValueStore, e)
-	}
-
-	if t.After != nil {
-		//do after
-		record, err := t.After(CurState.ValueStore, e)
-		if err != nil {
-			err.Add("Couldn't generate record")
-			return err
+		for i := range records {
+			m.Caterpillar.WrapAndSend(records[i])
 		}
-		m.Caterpillar.WrapAndSend(record)
 	}
 	if m.Nodes[t.Destination].Enter != nil {
 		//do node enter
-		record, err := m.Nodes[t.Destination].Enter(CurState.ValueStore, e)
+		records, err := m.Nodes[t.Destination].Enter(CurState.ValueStore, e)
 		if err != nil {
 			err.Add("Couldn't generate record")
 			return err
 		}
-		m.Caterpillar.WrapAndSend(record)
+		for i := range records {
+			m.Caterpillar.WrapAndSend(records[i])
+		}
 	}
 
 	//set currentnodea

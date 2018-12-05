@@ -143,13 +143,13 @@ func (c *Caterpillar) processEvent(e events.Event) {
 				if cur.Blanked {
 					//generate a 'time blanked' event.
 					r := catinter.MetricsRecord{
-						Blanked:    true,
+						Blanked:    &True,
 						RecordType: catinter.Blank,
 					}
 					c.AddMetaInfoAndSend(cur.BlankedChangeTime, e, r)
 				} else {
 					r := catinter.MetricsRecord{
-						Blanked:    false,
+						Blanked:    &False,
 						RecordType: catinter.Blank,
 					}
 					c.AddMetaInfoAndSend(cur.BlankedChangeTime, e, r)
@@ -164,9 +164,10 @@ func (c *Caterpillar) processEvent(e events.Event) {
 					c.AddMetaInfoAndSend(cur.VideoChangeTime, e, r)
 				}
 				if cur.VolumeSet && !cur.Muted {
+					vol := cur.CurVolume
 					//generate a 'time at volume' event.
 					r := catinter.MetricsRecord{
-						Volume:     cur.CurVolume,
+						Volume:     &vol,
 						RecordType: catinter.Volume,
 					}
 					c.AddMetaInfoAndSend(cur.VideoChangeTime, e, r)
@@ -175,7 +176,7 @@ func (c *Caterpillar) processEvent(e events.Event) {
 				if cur.Muted {
 					//generate a 'time muted' event.
 					r := catinter.MetricsRecord{
-						Muted:      true,
+						Muted:      &True,
 						RecordType: catinter.Mute,
 					}
 					c.AddMetaInfoAndSend(cur.AudioChangeTime, e, r)
@@ -253,7 +254,7 @@ func (c *Caterpillar) processEvent(e events.Event) {
 				r := catinter.MetricsRecord{Input: cur.CurInput, RecordType: catinter.Input}
 				c.AddMetaInfoAndSend(cur.VideoChangeTime, e, r)
 
-				r = catinter.MetricsRecord{Blanked: false, RecordType: catinter.Blank}
+				r = catinter.MetricsRecord{Blanked: &False, RecordType: catinter.Blank}
 				c.AddMetaInfoAndSend(cur.BlankedChangeTime, e, r)
 
 				cur.Blanked = v
@@ -262,7 +263,13 @@ func (c *Caterpillar) processEvent(e events.Event) {
 
 			} else {
 				//we're unblanking, send a time on blank event
-				r := catinter.MetricsRecord{Blanked: cur.Blanked, RecordType: catinter.Blank}
+				var r catinter.MetricsRecord
+				if cur.Blanked {
+					r = catinter.MetricsRecord{Blanked: &True, RecordType: catinter.Blank}
+				} else {
+					r = catinter.MetricsRecord{Blanked: &False, RecordType: catinter.Blank}
+
+				}
 				c.AddMetaInfoAndSend(cur.BlankedChangeTime, e, r)
 
 				cur.Blanked = v
@@ -291,7 +298,8 @@ func (c *Caterpillar) processEvent(e events.Event) {
 		} else {
 			if cur.CurVolume != v {
 				//it's a change
-				r := catinter.MetricsRecord{Volume: cur.CurVolume, RecordType: catinter.Volume}
+				vol := cur.CurVolume
+				r := catinter.MetricsRecord{Volume: &vol, RecordType: catinter.Volume}
 				c.AddMetaInfoAndSend(cur.AudioChangeTime, e, r)
 
 				cur.CurVolume = v
@@ -312,7 +320,8 @@ func (c *Caterpillar) processEvent(e events.Event) {
 			//it's a change
 			if v == true {
 				//we're blanking, set a time on input
-				r := catinter.MetricsRecord{Volume: cur.CurVolume, RecordType: catinter.Volume}
+				vol := cur.CurVolume
+				r := catinter.MetricsRecord{Volume: &vol, RecordType: catinter.Volume}
 				c.AddMetaInfoAndSend(cur.AudioChangeTime, e, r)
 
 				cur.Muted = v
@@ -320,7 +329,12 @@ func (c *Caterpillar) processEvent(e events.Event) {
 
 			} else {
 				//we're unblanking, send a time on blank event
-				r := catinter.MetricsRecord{Muted: cur.Muted, RecordType: catinter.Mute}
+				var r catinter.MetricsRecord
+				if cur.Muted {
+					r = catinter.MetricsRecord{Muted: &True, RecordType: catinter.Mute}
+				} else {
+					r = catinter.MetricsRecord{Muted: &False, RecordType: catinter.Mute}
+				}
 				c.AddMetaInfoAndSend(cur.AudioChangeTime, e, r)
 
 				cur.Muted = v
@@ -384,13 +398,16 @@ func (c *Caterpillar) AddMetaInfoAndSend(startTime time.Time, e events.Event, r 
 }
 
 //GetDeviceAndRoomInfo .
-func (c *Caterpillar) GetDeviceAndRoomInfo() *nerr.E {
+func GetDeviceAndRoomInfo() (map[string]catinter.DeviceInfo, map[string]catinter.RoomInfo, *nerr.E) {
+	toReturnDevice := map[string]catinter.DeviceInfo{}
+	toReturnRooms := map[string]catinter.RoomInfo{}
+
 	devs, err := db.GetDB().GetAllDevices()
 	if err != nil {
 		if v, ok := err.(*nerr.E); ok {
-			return v.Addf("Coudn't get device and room info.")
+			return toReturnDevice, toReturnRooms, v.Addf("Coudn't get device and room info.")
 		}
-		return nerr.Translate(err).Addf("Couldn't get device and room info.")
+		return toReturnDevice, toReturnRooms, nerr.Translate(err).Addf("Couldn't get device and room info.")
 	}
 	log.L.Infof("Initializing device list with %v devices", len(devs))
 
@@ -407,26 +424,36 @@ func (c *Caterpillar) GetDeviceAndRoomInfo() *nerr.E {
 			tmp.DeviceRoles = append(tmp.DeviceRoles, devs[i].Roles[j].ID)
 		}
 
-		c.devices[devs[i].ID] = tmp
+		toReturnDevice[devs[i].ID] = tmp
 	}
 
 	rooms, err := db.GetDB().GetAllRooms()
 	if err != nil {
 		if v, ok := err.(*nerr.E); ok {
-			return v.Addf("Coudn't get device and room info.")
+			return toReturnDevice, toReturnRooms, v.Addf("Coudn't get device and room info.")
 		}
-		return nerr.Translate(err).Addf("Couldn't get device and room info.")
+		return toReturnDevice, toReturnRooms, nerr.Translate(err).Addf("Couldn't get device and room info.")
 	}
 
 	log.L.Infof("Initializing room list with %v rooms", len(rooms))
 	for i := range rooms {
-		c.rooms[rooms[i].ID] = catinter.RoomInfo{
+		toReturnRooms[rooms[i].ID] = catinter.RoomInfo{
 			ID:              rooms[i].ID,
 			Tags:            rooms[i].Tags,
 			DeploymentGroup: rooms[i].Designation,
 		}
 	}
 
+	return toReturnDevice, toReturnRooms, nil
+}
+
+//GetDeviceAndRoomInfo .
+func (c *Caterpillar) GetDeviceAndRoomInfo() *nerr.E {
+	var err *nerr.E
+	c.devices, c.rooms, err = GetDeviceAndRoomInfo()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

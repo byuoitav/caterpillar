@@ -95,6 +95,7 @@ func (e *elkFeeder) getElkCount() (int, *nerr.E) {
 	}
 	e.eventcount = cr.Count
 
+	log.L.Debugf("Count %v returned %v records", e.config.Index, cr.Count)
 	return cr.Count, nil
 
 }
