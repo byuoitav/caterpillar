@@ -30,7 +30,7 @@
           "bool": {
             "must": [
               {"match": {"event-tags": "core-state"}},
-              {"match": {"target-device.deviceID": "ITB-1101-D2"}}
+              {"match": {"target-device.deviceID": "ITB-1101-D1"}}
             ]
           }
         }

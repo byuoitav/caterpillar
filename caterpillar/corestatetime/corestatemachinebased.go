@@ -136,9 +136,13 @@ func (c *MachineCaterpillar) buildStateMachine() (*sm.Machine, *nerr.E) {
 				TriggerKey:   "power",
 				TriggerValue: "standby",
 				Destination:  "powerstandby",
+				Actions: []func(map[string]interface{}, events.Event) ([]ci.MetricsRecord, *nerr.E){
+					c.BuildUnblankedRecord,
+				},
 			},
 		},
 		Enter: PowerOnStore,
+		Exit:  c.BuildInputRecord,
 	}
 
 	Nodes["inputactive"] = sm.Node{
@@ -172,6 +176,10 @@ func (c *MachineCaterpillar) buildStateMachine() (*sm.Machine, *nerr.E) {
 			sm.Transition{
 				TriggerKey:  "input",
 				Destination: "blank",
+				Internal:    true,
+				Actions: []func(map[string]interface{}, events.Event) ([]ci.MetricsRecord, *nerr.E){
+					InputStore,
+				},
 			},
 			sm.Transition{
 				TriggerKey:   "blanked",
@@ -194,6 +202,14 @@ func (c *MachineCaterpillar) buildStateMachine() (*sm.Machine, *nerr.E) {
 			sm.Transition{
 				TriggerKey:  "power",
 				Destination: "poweron",
+			},
+			sm.Transition{
+				TriggerKey:  "input",
+				Destination: "powerstandby",
+				Internal:    true,
+				Actions: []func(map[string]interface{}, events.Event) ([]ci.MetricsRecord, *nerr.E){
+					InputStore,
+				},
 			},
 		},
 		Enter: c.StandbyEnter,
@@ -315,7 +331,8 @@ func (c *MachineCaterpillar) BuildInputRecord(state map[string]interface{}, e ev
 
 		//unkown value stored
 	}
-	return []ci.MetricsRecord{}, nerr.Create("Cannot create input record with input state not set.", "invalid-state")
+	log.L.Warnf("Cannot create input record with input state not set.")
+	return []ci.MetricsRecord{}, nil
 }
 
 //EnterBlank .
@@ -345,25 +362,31 @@ func (c *MachineCaterpillar) EnterBlank(state map[string]interface{}, e events.E
 
 //UnBlankStore .
 func UnBlankStore(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
-	state["blank-set"] = e.Timestamp
-	state["blanked"] = false
+	if e.Key == "blanked" {
+		state["blank-set"] = e.Timestamp
+		state["blanked"] = false
+	}
 	return []ci.MetricsRecord{}, nil
 }
 
 //InputStore .
 func InputStore(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
-	state["input-set"] = e.Timestamp
-	state["input"] = e.Value
+	if e.Key == "input" && e.Value != "" {
+		state["input-set"] = e.Timestamp
+		state["input"] = e.Value
+	}
 	return []ci.MetricsRecord{}, nil
 }
 
 //PowerOnStore .
 func PowerOnStore(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
-	state["power-set"] = e.Timestamp
-	state["blank-set"] = e.Timestamp
-	state["input-set"] = e.Timestamp
-	state["power"] = "on"
-	state["blanked"] = false
+	if e.Key == "power" {
+		state["power-set"] = e.Timestamp
+		state["blank-set"] = e.Timestamp
+		state["input-set"] = e.Timestamp
+		state["power"] = "on"
+		state["blanked"] = false
+	}
 	return []ci.MetricsRecord{}, nil
 }
 
@@ -413,6 +436,9 @@ func (c *MachineCaterpillar) RegisterGobStructs() {
 
 //WrapAndSend .
 func (c *MachineCaterpillar) WrapAndSend(r ci.MetricsRecord) {
+	if r.ElapsedInSeconds < 1 {
+		return
+	}
 
 	printRecord(r)
 

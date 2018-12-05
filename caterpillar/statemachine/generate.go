@@ -104,8 +104,13 @@ func (m *Machine) ProcessEvent(e events.Event) *nerr.E {
 //transition
 func (m *Machine) transition(e events.Event, t Transition, CurState *MachineState) *nerr.E {
 
+	internal := t.Internal && t.Destination == CurState.CurNode
+	if internal {
+		log.L.Debugf("Internal transition")
+	}
+
 	//do node exit
-	if m.Nodes[CurState.CurNode].Exit != nil {
+	if m.Nodes[CurState.CurNode].Exit != nil && !internal {
 		records, err := m.Nodes[CurState.CurNode].Exit(CurState.ValueStore, e)
 		if err != nil {
 			err.Add("Couldn't generate record")
@@ -126,7 +131,7 @@ func (m *Machine) transition(e events.Event, t Transition, CurState *MachineStat
 			m.Caterpillar.WrapAndSend(records[i])
 		}
 	}
-	if m.Nodes[t.Destination].Enter != nil {
+	if m.Nodes[t.Destination].Enter != nil && !internal {
 		//do node enter
 		records, err := m.Nodes[t.Destination].Enter(CurState.ValueStore, e)
 		if err != nil {
