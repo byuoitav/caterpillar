@@ -1,10 +1,19 @@
 package statemachine
 
 import (
+	"fmt"
+	"io/ioutil"
+	"reflect"
+	"runtime"
+	"strconv"
+	"strings"
+
+	"github.com/awalterschulze/gographviz"
 	"github.com/byuoitav/caterpillar/caterpillar/catinter"
 	cst "github.com/byuoitav/caterpillar/caterpillar/catinter"
 	"github.com/byuoitav/caterpillar/config"
 	"github.com/byuoitav/caterpillar/nydus"
+	"github.com/byuoitav/common/log"
 	"github.com/byuoitav/common/nerr"
 	"github.com/byuoitav/common/v2/events"
 )
@@ -80,7 +89,182 @@ type TransitionStoreValue struct {
 	StoreValue string
 }
 
-//PrintDotFile .
-func (m *Machine) PrintDotFile() {
+//PrintSimpleDotFile .
+func (m *Machine) PrintSimpleDotFile() *nerr.E {
+	graph := gographviz.NewGraph()
+	graph.SetDir(true)
 
+	for i := range m.Nodes {
+		err := graph.AddNode("Machines", m.Nodes[i].ID, map[string]string{
+			"shape": "octagon",
+		})
+		if err != nil {
+			log.L.Errorf("%v", err.Error())
+			return nerr.Translate(err)
+		}
+
+		for j, t := range m.Nodes[i].Transitions {
+			pid := strconv.Itoa(j) //pathid, grows as it moves
+			//add a node for this exit (if any)
+			name, err := AddExit(m.Nodes[i], pid, t, graph)
+			if err != nil {
+				return err
+			}
+			//now we add one for each action
+			for k, a := range t.Actions {
+
+				pid += strconv.Itoa(k)
+				name, err = AddAction(m.Nodes[i], name, pid, t, a, graph, name == m.Nodes[i].ID)
+				if err != nil {
+					return err
+				}
+			}
+			//now we check to see if there's an entry node for our destination
+			name, err = AddEntry(m.Nodes[i], m.Nodes[t.Destination], name, pid, t, graph, name == m.Nodes[i].ID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	fmt.Printf("%v\n", graph.String())
+	err := ioutil.WriteFile("simple-out.dot", []byte(graph.String()), 0777)
+	if err != nil {
+		log.L.Errorf("Coudn't write dot file: %v.", err)
+		return nerr.Translate(err)
+	}
+
+	return nil
+}
+
+//AddAction .
+func AddAction(n Node, prev, transitionID string, t Transition, a func(map[string]interface{}, events.Event) ([]catinter.MetricsRecord, *nerr.E), g *gographviz.Graph, transitionLabel bool) (string, *nerr.E) {
+	name := runtime.FuncForPC(reflect.ValueOf(a).Pointer()).Name()
+	label := strings.TrimRight(name[strings.LastIndex(name, ".")+1:], "-fm")
+	name = fmt.Sprintf("%v%v%v", label, n.ID, transitionID)
+
+	err := g.AddNode("Machines", name, map[string]string{
+		"shape": "box",
+		"label": fmt.Sprintf("\"%v\"", label),
+	})
+	if err != nil {
+		log.L.Errorf("%v", err.Error())
+		return "", nerr.Translate(err)
+	}
+
+	//add an edge
+	err = g.AddEdge(prev, name, true, map[string]string{
+		"label": generateTransitionLabel(t),
+	})
+	if err != nil {
+		log.L.Errorf("%v", err.Error())
+		return "", nerr.Translate(err)
+	}
+	return name, nil
+}
+
+//AddEntry .
+func AddEntry(src, dst Node, prev, transitionID string, t Transition, g *gographviz.Graph, transitionLabel bool) (string, *nerr.E) {
+
+	if dst.Enter != nil && !t.Internal {
+		name := runtime.FuncForPC(reflect.ValueOf(dst.Enter).Pointer()).Name()
+		label := strings.TrimRight(name[strings.LastIndex(name, ".")+1:], "-fm")
+		name = fmt.Sprintf("%v%v%v", label, src.ID, transitionID)
+
+		err := g.AddNode("Machines", name, map[string]string{
+			"shape": "box",
+			"label": fmt.Sprintf("\"%v\"", label),
+			"color": "\"#00BCD4\"",
+		})
+		if err != nil {
+			log.L.Errorf("%v", err.Error())
+			return "", nerr.Translate(err)
+		}
+
+		//add an edge
+		if transitionLabel {
+			err = g.AddEdge(prev, name, true, map[string]string{
+				"label": generateTransitionLabel(t),
+			})
+		} else {
+			err = g.AddEdge(prev, name, true, nil)
+		}
+		if err != nil {
+			log.L.Errorf("%v", err.Error())
+			return "", nerr.Translate(err)
+		}
+
+		//add an edge from the exit fun to the actual node
+		if transitionLabel {
+			err = g.AddEdge(name, dst.ID, true, map[string]string{
+				"label": generateTransitionLabel(t),
+			})
+		} else {
+			err = g.AddEdge(name, dst.ID, true, nil)
+		}
+
+		if err != nil {
+			log.L.Errorf("%v", err.Error())
+			return "", nerr.Translate(err)
+		}
+
+		return dst.ID, nil
+
+	}
+
+	var err error
+	//add an edge from the exit fun to the actual node
+	if transitionLabel {
+		err = g.AddEdge(prev, dst.ID, true, map[string]string{
+			"label": generateTransitionLabel(t),
+		})
+	} else {
+		err = g.AddEdge(prev, dst.ID, true, nil)
+	}
+
+	if err != nil {
+		log.L.Errorf("%v", err.Error())
+		return "", nerr.Translate(err)
+	}
+
+	return dst.ID, nil
+}
+
+//AddExit .
+func AddExit(n Node, transitionID string, t Transition, g *gographviz.Graph) (string, *nerr.E) {
+
+	if n.Exit != nil && !t.Internal {
+		name := runtime.FuncForPC(reflect.ValueOf(n.Exit).Pointer()).Name()
+		label := strings.TrimRight(name[strings.LastIndex(name, ".")+1:], "-fm")
+		name = fmt.Sprintf("%v%v%v", label, n.ID, transitionID)
+
+		err := g.AddNode("Machines", name, map[string]string{
+			"shape": "box",
+			"label": fmt.Sprintf("\"%v\"", label),
+			"color": "\"#7B1FA2\"",
+		})
+		if err != nil {
+			log.L.Errorf("%v", err.Error())
+			return "", nerr.Translate(err)
+		}
+
+		//add an edge
+		err = g.AddEdge(n.ID, name, true, map[string]string{
+			"label": generateTransitionLabel(t),
+		})
+		if err != nil {
+			log.L.Errorf("%v", err.Error())
+			return "", nerr.Translate(err)
+		}
+		return name, nil
+
+	}
+	return n.ID, nil
+}
+
+func generateTransitionLabel(t Transition) string {
+
+	if t.TriggerValue == nil {
+		return fmt.Sprintf("\"Key %v Value: *\"", t.TriggerKey)
+	}
+	return fmt.Sprintf("\"Key %v Value: %v\"", t.TriggerKey, t.TriggerValue)
 }

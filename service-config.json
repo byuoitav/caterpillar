@@ -24,14 +24,11 @@
       "index": "av-delta-events*",
       "interval": "0 * * * * *",
       "time-field": "timestamp",
-      "max-interval": "48h",
+      "max-interval": "960h",
       "query": {
         "query": {
           "bool": {
-            "must": [
-              {"match": {"event-tags": "core-state"}},
-              {"match": {"target-device.deviceID": "ITB-1101-D1"}}
-            ]
+            "must": [{"match": {"event-tags": "core-state"}}]
           }
         }
       },

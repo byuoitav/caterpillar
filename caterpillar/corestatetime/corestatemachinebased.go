@@ -200,8 +200,9 @@ func (c *MachineCaterpillar) buildStateMachine() (*sm.Machine, *nerr.E) {
 		ID: "powerstandby",
 		Transitions: []sm.Transition{
 			sm.Transition{
-				TriggerKey:  "power",
-				Destination: "poweron",
+				TriggerKey:   "power",
+				TriggerValue: "on",
+				Destination:  "poweron",
 			},
 			sm.Transition{
 				TriggerKey:  "input",

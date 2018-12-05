@@ -1,0 +1,47 @@
+digraph  {
+	EnterBlank->blank[ color="#00acc1" ];
+	blank->BuildBlankedRecord[ color="#00acc1", label="
+Key input Value: *
+Key blanked Value: false
+Key power Value: standby" ];
+	StandbyEnter->powerstandby[ color="#00acc1" ];
+	powerstandby->StandbyExit[ color="#00acc1", label="
+Key power Value: on
+Key input Value: *" ];
+	PowerOnStore->poweron[ color="#00acc1" ];
+	poweron->BuildInputRecord[ color="#00acc1", label="
+Key input Value: *
+Key blanked Value: true
+Key power Value: standby" ];
+	InputStore->inputactive[ color="#00acc1" ];
+	inputactive->BuildInputRecord[ color="#00acc1", label="
+Key input Value: *
+Key blanked Value: true
+Key power Value: standby" ];
+	start->PowerOnStore[ label="Key power Value: on" ];
+	BuildInputRecord->InputStore[ label="Key input Value: *" ];
+	BuildInputRecord->EnterBlank[ label="Key blanked Value: true" ];
+	BuildInputRecord->BuildUnblankedRecord[ label="Key power Value: standby" ];
+	BuildUnblankedRecord->StandbyEnter[ label="Key power Value: standby" ];
+	BuildBlankedRecord->InputStore[ label="Key input Value: * 
+ Key blanked Value: false" ];
+	InputStore->EnterBlank[ label="Key input Value: *" ];
+	BuildBlankedRecord->StandbyEnter[ label="Key power Value: standby" ];
+	StandbyExit->PowerOnStore[ label="Key power Value: on" ];
+	StandbyExit->InputStore[ label="Key input Value: *" ];
+	InputStore->StandbyEnter[ label="Key input Value: *" ];
+	BuildBlankedRecord;
+	BuildInputRecord;
+	BuildUnblankedRecord;
+	EnterBlank;
+	InputStore;
+	PowerOnStore;
+	StandbyEnter;
+	StandbyExit;
+	blank [ color="#FF0000" ];
+	inputactive [ color="#FF0000" ];
+	poweron [ color="#FF0000" ];
+	powerstandby [ color="#FF0000" ];
+	start [ color="#FF0000" ];
+
+}
