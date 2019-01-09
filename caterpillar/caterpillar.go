@@ -14,7 +14,6 @@ var caterpillarRegistry map[string]func() (catinter.Caterpillar, *nerr.E)
 func init() {
 	caterpillarRegistry = map[string]func() (catinter.Caterpillar, *nerr.E){
 		"joe_test":                test.GetCaterpillar,
-		"core-state-time":         corestatetime.GetCaterpillar,
 		"core-state-time-machine": corestatetime.GetMachineCaterpillar,
 	}
 }

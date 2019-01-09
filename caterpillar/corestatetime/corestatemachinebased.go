@@ -11,9 +11,11 @@ import (
 	sm "github.com/byuoitav/caterpillar/caterpillar/statemachine"
 	"github.com/byuoitav/caterpillar/config"
 	"github.com/byuoitav/caterpillar/nydus"
+	"github.com/byuoitav/common/db"
 	"github.com/byuoitav/common/log"
 	"github.com/byuoitav/common/nerr"
 	"github.com/byuoitav/common/v2/events"
+	"github.com/byuoitav/wso2services/classschedules/registar"
 )
 
 //MachineCaterpillar .
@@ -26,8 +28,7 @@ type MachineCaterpillar struct {
 	devices map[string]ci.DeviceInfo
 	rooms   map[string]ci.RoomInfo
 
-	curState map[string]State
-	index    string
+	index string
 
 	GobRegisterOnce sync.Once
 }
@@ -52,10 +53,9 @@ func init() {
 func GetMachineCaterpillar() (ci.Caterpillar, *nerr.E) {
 
 	toReturn := &MachineCaterpillar{
-		rectype:  "metrics",
-		devices:  map[string]ci.DeviceInfo{},
-		rooms:    map[string]ci.RoomInfo{},
-		curState: map[string]State{},
+		rectype: "metrics",
+		devices: map[string]ci.DeviceInfo{},
+		rooms:   map[string]ci.RoomInfo{},
 	}
 
 	var err *nerr.E
@@ -90,8 +90,14 @@ func (c *MachineCaterpillar) Run(id string, recordCount int, state config.State,
 	if err != nil {
 		return state, err.Addf("Couldn't run machinecaterepillar")
 	}
+
+	count := 0
+	lastTime := time.Time{}
 	for i := range inchan {
 		if e, ok := i.(events.Event); ok {
+			count++
+			log.L.Debugf("Processing event %v", count)
+			lastTime = e.Timestamp
 			err = c.Machine.ProcessEvent(e)
 			if err != nil {
 				log.L.Errorf("Error procssing event: %v", err.Error())
@@ -99,9 +105,20 @@ func (c *MachineCaterpillar) Run(id string, recordCount int, state config.State,
 		} else {
 			log.L.Warnf("Unkown type in channel %v", i)
 		}
+		log.L.Debugf("Waiting for next event..")
 	}
 
-	return config.State{}, nil
+	//build our state machine
+	d := map[string]sm.MachineState{}
+
+	for k, v := range c.Machine.CurStates {
+		d[k] = *v
+	}
+
+	return config.State{
+		LastEventTime: lastTime,
+		Data:          d,
+	}, nil
 }
 
 func (c *MachineCaterpillar) buildStateMachine() (*sm.Machine, *nerr.E) {
@@ -236,8 +253,7 @@ func (c *MachineCaterpillar) StandbyEnter(state map[string]interface{}, e events
 	state["power"] = "standby"
 	state["power-set"] = e.Timestamp
 
-	rec, err := c.AddMetaInfo(startTime, e, toReturn)
-	return []ci.MetricsRecord{rec}, err
+	return c.AddMetaInfo(startTime, e, toReturn)
 }
 
 //StandbyExit .
@@ -256,8 +272,7 @@ func (c *MachineCaterpillar) StandbyExit(state map[string]interface{}, e events.
 	state["power"] = "on"
 	state["power-set"] = e.Timestamp
 
-	rec, err := c.AddMetaInfo(startTime, e, toReturn)
-	return []ci.MetricsRecord{rec}, err
+	return c.AddMetaInfo(startTime, e, toReturn)
 }
 
 //BuildBlankedRecord .
@@ -278,8 +293,7 @@ func (c *MachineCaterpillar) BuildBlankedRecord(state map[string]interface{}, e 
 	state["input-set"] = e.Timestamp
 	state["blank-set"] = e.Timestamp
 
-	rec, err := c.AddMetaInfo(startTime, e, toReturn)
-	return []ci.MetricsRecord{rec}, err
+	return c.AddMetaInfo(startTime, e, toReturn)
 }
 
 //BuildUnblankedRecord .
@@ -296,8 +310,7 @@ func (c *MachineCaterpillar) BuildUnblankedRecord(state map[string]interface{}, 
 		return []ci.MetricsRecord{}, nerr.Create("blank-set not set to time.Time", "invalid-state")
 	}
 
-	rec, err := c.AddMetaInfo(startTime, e, toReturn)
-	return []ci.MetricsRecord{rec}, err
+	return c.AddMetaInfo(startTime, e, toReturn)
 }
 
 //BuildInputRecord .
@@ -307,7 +320,6 @@ func (c *MachineCaterpillar) BuildInputRecord(state map[string]interface{}, e ev
 	toReturn := ci.MetricsRecord{
 		RecordType: ci.Input,
 	}
-	var err *nerr.E
 
 	//check to see if it's an input change
 	var curInputStr string
@@ -320,11 +332,7 @@ func (c *MachineCaterpillar) BuildInputRecord(state map[string]interface{}, e ev
 			}
 			toReturn.Input = curInputStr
 			if startTime, ok := state["input-set"].(time.Time); ok {
-				toReturn, err = c.AddMetaInfo(startTime, e, toReturn)
-				if err != nil {
-					return []ci.MetricsRecord{}, err
-				}
-				return []ci.MetricsRecord{toReturn}, nil
+				return c.AddMetaInfo(startTime, e, toReturn)
 			}
 			return []ci.MetricsRecord{}, nerr.Create(fmt.Sprintf("input-store not set to time.Time, value %v", state["input-store"]), "invalid-state")
 		}
@@ -332,6 +340,7 @@ func (c *MachineCaterpillar) BuildInputRecord(state map[string]interface{}, e ev
 
 		//unkown value stored
 	}
+
 	log.L.Warnf("Cannot create input record with input state not set.")
 	return []ci.MetricsRecord{}, nil
 }
@@ -358,7 +367,7 @@ func (c *MachineCaterpillar) EnterBlank(state map[string]interface{}, e events.E
 	state["blanked"] = true
 
 	rec, err := c.AddMetaInfo(startTime, e, toReturn)
-	return []ci.MetricsRecord{rec}, err
+	return rec, err
 }
 
 //UnBlankStore .
@@ -392,7 +401,7 @@ func PowerOnStore(state map[string]interface{}, e events.Event) ([]ci.MetricsRec
 }
 
 //AddMetaInfo .
-func (c *MachineCaterpillar) AddMetaInfo(startTime time.Time, e events.Event, r ci.MetricsRecord) (ci.MetricsRecord, *nerr.E) {
+func (c *MachineCaterpillar) AddMetaInfo(startTime time.Time, e events.Event, r ci.MetricsRecord) ([]ci.MetricsRecord, *nerr.E) {
 
 	r.Device = ci.DeviceInfo{ID: e.TargetDevice.DeviceID}
 	r.Room = ci.RoomInfo{ID: e.TargetDevice.RoomID}
@@ -412,7 +421,7 @@ func (c *MachineCaterpillar) AddMetaInfo(startTime time.Time, e events.Event, r 
 	} else {
 		err := nerr.Create(fmt.Sprintf("unkown device %v", r.Device.ID), "invalid-device")
 		log.L.Errorf("%v", err.Error())
-		return r, err
+		return []ci.MetricsRecord{r}, err
 	}
 
 	if room, ok := c.rooms[r.Room.ID]; ok {
@@ -420,19 +429,109 @@ func (c *MachineCaterpillar) AddMetaInfo(startTime time.Time, e events.Event, r 
 	} else {
 		err := nerr.Create(fmt.Sprintf("unkown room %v", r.Device.ID), "invalid-room")
 		log.L.Errorf("%v", err.Error())
-		return r, err
+		return []ci.MetricsRecord{r}, err
 	}
 
-	AddTimeFields(startTime, e.Timestamp, &r)
-
-	return r, nil
+	return AddClassTimes(startTime, e.Timestamp, r)
 }
 
 //RegisterGobStructs .
 func (c *MachineCaterpillar) RegisterGobStructs() {
 	c.GobRegisterOnce.Do(func() {
-		gob.Register(sm.MachineState{})
+		gob.Register(map[string]sm.MachineState{})
+		gob.Register(time.Time{})
 	})
+}
+
+//AddClassTimes .
+func AddClassTimes(start, end time.Time, r ci.MetricsRecord) ([]ci.MetricsRecord, *nerr.E) {
+	log.L.Debugf("Adding class times for %v", r.Room.ID)
+
+	//we split the record into multiple recors, each with the class info filled out for that class.
+	schedules, err := registar.GetClassScheduleForTimeBlock(r.Room.ID, start, end)
+	if err != nil {
+		return []ci.MetricsRecord{}, err.Addf("Couldn't add class info to event")
+	}
+	log.L.Debugf("Got the schedules.")
+
+	loc, er := time.LoadLocation("America/Denver")
+	if er != nil {
+		log.L.Errorf("Couldn't load America/Denver time zone: %v", er.Error())
+		return []ci.MetricsRecord{}, nerr.Translate(er)
+	}
+
+	adjust := 0 * time.Hour //hours to add
+
+	//we need to check if the times in questions are daylight savings or not... things are read in the -7 time zone, so we're moving to the -6
+	_, offset := start.In(loc).Zone()
+	if offset == -6*60*60 {
+		adjust = 1 * time.Hour
+	}
+
+	log.L.Debugf("Adding class times to event-type %+v. StartTime %v, end Time %v", r.RecordType, start.In(time.Local), end.In(time.Local))
+
+	toReturn := []ci.MetricsRecord{}
+
+	lastClassEnd := start
+	//we need to go through add class info
+	for _, v := range schedules {
+		v.StartTime.Add(adjust)
+		v.EndTime.Add(adjust)
+
+		curInfo := ci.ClassInfo{
+			DeptName:        v.DeptName,
+			CatalogNumber:   v.CatalogNumber,
+			ClassName:       fmt.Sprintf("%v-%v", v.DeptName, v.CatalogNumber),
+			CreditHours:     v.CreditHours,
+			ClassSize:       v.SectionSize,
+			ClassEnrollment: v.TotalEnr,
+			Instructor:      v.InstructorName,
+
+			ClassStart: v.StartTime,
+			ClassEnd:   v.EndTime,
+		}
+
+		if lastClassEnd.Before(v.StartTime) {
+			//I need to generate one for the time from last class end to v.StartTime
+
+			tmp := r
+			tmp.StartTime = lastClassEnd
+			tmp.EndTime = v.StartTime
+			tmp.ElapsedInSeconds = int64((end.Sub(start)) / time.Second)
+
+			log.L.Debugf("Adding front-padded time block %v %v ", tmp.StartTime.In(time.Local), tmp.EndTime.In(time.Local))
+			toReturn = append(toReturn, tmp)
+		}
+
+		//now we need to figure out the end time
+		tmpend := v.EndTime
+		if tmpend.After(end) {
+			tmpend = end
+		}
+
+		tmp := r
+		tmp.StartTime = v.StartTime
+		tmp.EndTime = tmpend
+		tmp.ElapsedInSeconds = int64((end.Sub(start)) / time.Second)
+		tmp.Class = curInfo
+		toReturn = append(toReturn, tmp)
+		log.L.Debugf("Adding class time block for %v from %v to %v ", tmp.Class.ClassName, tmp.StartTime.In(time.Local), tmp.EndTime.In(time.Local))
+
+		lastClassEnd = tmpend
+	}
+
+	if !lastClassEnd.Equal(end) {
+		//we need to generate one for the end block
+		tmp := r
+		tmp.StartTime = lastClassEnd
+		tmp.EndTime = end
+		tmp.ElapsedInSeconds = int64((end.Sub(start)) / time.Second)
+		log.L.Debugf("Adding back-padded time block %v %v ", tmp.StartTime.In(time.Local), tmp.EndTime.In(time.Local))
+
+		toReturn = append(toReturn, tmp)
+	}
+
+	return toReturn, nil
 }
 
 //WrapAndSend .
@@ -465,4 +564,54 @@ func printRecord(r ci.MetricsRecord) {
 		log.L.Debugf("Generating %v %v Time %v Starting %v Ending %v", r.RecordType, r.Power, r.ElapsedInSeconds, r.StartTime.In(location).Format("15:04:05 01-02"), r.EndTime.In(location).Format("15:04:05 01-02"))
 	}
 
+}
+
+//GetDeviceAndRoomInfo .
+func GetDeviceAndRoomInfo() (map[string]ci.DeviceInfo, map[string]ci.RoomInfo, *nerr.E) {
+	toReturnDevice := map[string]ci.DeviceInfo{}
+	toReturnRooms := map[string]ci.RoomInfo{}
+
+	devs, err := db.GetDB().GetAllDevices()
+	if err != nil {
+		if v, ok := err.(*nerr.E); ok {
+			return toReturnDevice, toReturnRooms, v.Addf("Coudn't get device and room info.")
+		}
+		return toReturnDevice, toReturnRooms, nerr.Translate(err).Addf("Couldn't get device and room info.")
+	}
+	log.L.Infof("Initializing device list with %v devices", len(devs))
+
+	for i := range devs {
+		log.L.Debugf("%v", devs[i].ID)
+		tmp := ci.DeviceInfo{
+			ID:         devs[i].ID,
+			DeviceType: devs[i].Type.ID,
+			Tags:       devs[i].Tags,
+		}
+
+		//build the roles
+		for j := range devs[i].Roles {
+			tmp.DeviceRoles = append(tmp.DeviceRoles, devs[i].Roles[j].ID)
+		}
+
+		toReturnDevice[devs[i].ID] = tmp
+	}
+
+	rooms, err := db.GetDB().GetAllRooms()
+	if err != nil {
+		if v, ok := err.(*nerr.E); ok {
+			return toReturnDevice, toReturnRooms, v.Addf("Coudn't get device and room info.")
+		}
+		return toReturnDevice, toReturnRooms, nerr.Translate(err).Addf("Couldn't get device and room info.")
+	}
+
+	log.L.Infof("Initializing room list with %v rooms", len(rooms))
+	for i := range rooms {
+		toReturnRooms[rooms[i].ID] = ci.RoomInfo{
+			ID:              rooms[i].ID,
+			Tags:            rooms[i].Tags,
+			DeploymentGroup: rooms[i].Designation,
+		}
+	}
+
+	return toReturnDevice, toReturnRooms, nil
 }

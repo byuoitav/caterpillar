@@ -23,7 +23,7 @@ const (
 	GenAction = "gen-action"
 )
 
-//BuildStateMachine ScopeType corresponds to a field in the event to use as the 'key' for the statemachine. Currently we only accept 'deviceid'
+//BuildStateMachine ScopeType corresponds to a field in the event to use as the 'key' for the statemachine. Currently we only accept 'deviceid', 'roomid', or 'buildingid'
 func BuildStateMachine(scopeKey string, nodes map[string]Node, startNode string, state config.State, cat catinter.Caterpillar) (*Machine, *nerr.E) {
 
 	m := Machine{
@@ -96,7 +96,9 @@ func (m *Machine) PrintSimpleDotFile() *nerr.E {
 
 	for i := range m.Nodes {
 		err := graph.AddNode("Machines", m.Nodes[i].ID, map[string]string{
-			"shape": "octagon",
+			"shape":     "octagon",
+			"color":     "\"#e53935\"",
+			"fontcolor": "\"#e53935\"",
 		})
 		if err != nil {
 			log.L.Errorf("%v", err.Error())
@@ -171,9 +173,10 @@ func AddEntry(src, dst Node, prev, transitionID string, t Transition, g *gograph
 		name = fmt.Sprintf("%v%v%v", label, src.ID, transitionID)
 
 		err := g.AddNode("Machines", name, map[string]string{
-			"shape": "box",
-			"label": fmt.Sprintf("\"%v\"", label),
-			"color": "\"#00BCD4\"",
+			"shape":     "box",
+			"label":     fmt.Sprintf("\"%v\"", label),
+			"color":     "\"#4caf50\"",
+			"fontcolor": "\"#4caf50\"",
 		})
 		if err != nil {
 			log.L.Errorf("%v", err.Error())
@@ -238,9 +241,10 @@ func AddExit(n Node, transitionID string, t Transition, g *gographviz.Graph) (st
 		name = fmt.Sprintf("%v%v%v", label, n.ID, transitionID)
 
 		err := g.AddNode("Machines", name, map[string]string{
-			"shape": "box",
-			"label": fmt.Sprintf("\"%v\"", label),
-			"color": "\"#7B1FA2\"",
+			"shape":     "box",
+			"label":     fmt.Sprintf("\"%v\"", label),
+			"color":     "\"#7E57C2\"",
+			"fontcolor": "\"#7E57C2\"",
 		})
 		if err != nil {
 			log.L.Errorf("%v", err.Error())

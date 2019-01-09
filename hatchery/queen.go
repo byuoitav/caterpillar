@@ -60,6 +60,7 @@ func (q Queen) Run() {
 		log.L.Debugf("%s", err.Stack)
 		return
 	}
+	log.L.Debugf("State before run: %v", info)
 
 	//get the feeder, from that we can get the number of events.
 	feed, err := feeder.GetFeeder(q.config, info.LastEventTime)
@@ -83,6 +84,8 @@ func (q Queen) Run() {
 		log.L.Debugf("%s", err.Stack)
 		return
 	}
+
+	log.L.Debugf("State after run; %v", state)
 
 	err = store.PutInfo(q.config.ID, state)
 	if err != nil {

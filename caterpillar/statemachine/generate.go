@@ -31,7 +31,7 @@ func (m *Machine) ProcessEvent(e events.Event) *nerr.E {
 	}
 
 	log.L.Debugf("Current state %v", cur.CurNode)
-	log.L.Debugf("Processing event %v, %v, %v", e.Key, e.Value, e.Timestamp.In(location).Format("15:04:05 01-02"))
+	log.L.Debugf("Processing event %v, %v, %v, %v", k, e.Key, e.Value, e.Timestamp.In(location).Format("15:04:05 01-02"))
 	//check the transitions from the current state of m
 	curNode, ok := m.Nodes[cur.CurNode]
 	if !ok {
@@ -74,8 +74,10 @@ func (m *Machine) ProcessEvent(e events.Event) *nerr.E {
 				} else {
 					log.L.Debugf("Transitioning on transition %v from state %v", i, curNode.ID)
 				}
-				//otherwise we transition
+
+				log.L.Debugf("Starting transition.")
 				err := m.transition(e, t, cur)
+				log.L.Debugf("Back from transition")
 				if err != nil {
 					if len(t.ID) > 0 {
 						err = err.Addf("Error with transition %v", t.ID)
@@ -109,6 +111,7 @@ func (m *Machine) transition(e events.Event, t Transition, CurState *MachineStat
 		log.L.Debugf("Internal transition")
 	}
 
+	log.L.Debugf("Running external transition")
 	//do node exit
 	if m.Nodes[CurState.CurNode].Exit != nil && !internal {
 		records, err := m.Nodes[CurState.CurNode].Exit(CurState.ValueStore, e)
@@ -116,10 +119,12 @@ func (m *Machine) transition(e events.Event, t Transition, CurState *MachineStat
 			err.Add("Couldn't generate record")
 			return err
 		}
+		log.L.Debugf("Exit generated %v records", len(records))
 		for i := range records {
 			m.Caterpillar.WrapAndSend(records[i])
 		}
 	}
+	log.L.Debugf("Done with exit.")
 
 	for i := range t.Actions {
 		records, err := t.Actions[i](CurState.ValueStore, e)
@@ -131,6 +136,7 @@ func (m *Machine) transition(e events.Event, t Transition, CurState *MachineStat
 			m.Caterpillar.WrapAndSend(records[i])
 		}
 	}
+	log.L.Debugf("Done with actions.")
 	if m.Nodes[t.Destination].Enter != nil && !internal {
 		//do node enter
 		records, err := m.Nodes[t.Destination].Enter(CurState.ValueStore, e)
@@ -142,6 +148,7 @@ func (m *Machine) transition(e events.Event, t Transition, CurState *MachineStat
 			m.Caterpillar.WrapAndSend(records[i])
 		}
 	}
+	log.L.Debugf("Done with enter.")
 
 	//set currentnodea
 	CurState.CurNode = t.Destination
@@ -151,5 +158,14 @@ func (m *Machine) transition(e events.Event, t Transition, CurState *MachineStat
 
 //GetScope .
 func GetScope(key string, e events.Event) (string, *nerr.E) {
-	return e.TargetDevice.DeviceID, nil
+	switch key {
+	case "deviceid":
+		return e.TargetDevice.DeviceID, nil
+	case "roomid":
+		return e.TargetDevice.RoomID, nil
+	case "buildingid":
+		return e.TargetDevice.BuildingID, nil
+
+	}
+	return "", nil
 }

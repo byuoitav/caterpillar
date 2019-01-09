@@ -10,10 +10,9 @@ import (
 func TestBuildGraph(t *testing.T) {
 
 	mc := &MachineCaterpillar{
-		rectype:  "metrics",
-		devices:  map[string]ci.DeviceInfo{},
-		rooms:    map[string]ci.RoomInfo{},
-		curState: map[string]State{},
+		rectype: "metrics",
+		devices: map[string]ci.DeviceInfo{},
+		rooms:   map[string]ci.RoomInfo{},
 	}
 	log.SetLevel("debug")
 

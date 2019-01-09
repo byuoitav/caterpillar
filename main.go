@@ -23,7 +23,7 @@ func main() {
 		log.L.Fatal(err.Error())
 	}
 
-	q := hatchery.SpawnQueen(c.Caterpillars[1], n.GetChannel())
+	q := hatchery.SpawnQueen(c.Caterpillars[0], n.GetChannel())
 	q.Run()
 	time.Sleep(7 * time.Second)
 }

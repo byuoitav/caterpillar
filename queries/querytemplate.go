@@ -41,7 +41,7 @@ type TimeRangeFilter struct {
 
 //DateRange .
 type DateRange struct {
-	StartTime time.Time `json:"gte"` //no omitempty on purpose
+	StartTime time.Time `json:"gt"` //no omitempty on purpose
 	EndTime   time.Time `json:"lte,omimempty"`
 }
 

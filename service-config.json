@@ -1,34 +1,19 @@
 {
   "caterpillars": [
     {
-      "id": "joe_test",
-      "type": "joe_test",
-      "index": "av-all-events*",
-      "interval": "0 * * * * *",
-      "time-field": "timestamp",
-      "max-interval": "",
-      "query": {
-        "query": {
-          "bool": {
-            "must": [{"match": {"generating-system": "ITB-1101-CP1"}}]
-          }
-        }
-      },
-      "type-config": {
-        "output-index": "caterpillar-test"
-      }
-    },
-    {
       "id": "CoreStateTime",
       "type": "core-state-time-machine",
       "index": "av-delta-events*",
       "interval": "0 * * * * *",
       "time-field": "timestamp",
-      "max-interval": "960h",
+      "max-interval": "12h",
       "query": {
         "query": {
           "bool": {
-            "must": [{"match": {"event-tags": "core-state"}}]
+            "must": [
+              {"match": {"event-tags": "core-state"}},
+              {"match": {"affected-room.roomID": "ITB-1101"}}
+            ]
           }
         }
       },
