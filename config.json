@@ -1,0 +1,14 @@
+{
+    "name": "caterpillar",
+    "port": "10012",
+    "env-vars": [
+        "CONFIG_LOCATION",
+        "DB_ADDRESS",
+        "DB_PASSWORD",
+        "DB_USERNAME",
+        "ELK_DIRECT_ADDRESS",
+        "ELK_SA_PASSWORD",
+        "ELK_SA_USERNAME",
+        "WSO2_TOKEN"
+    ]
+}
