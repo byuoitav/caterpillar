@@ -30,7 +30,7 @@ func initializeStore() {
 
 	db, er = badger.Open(opts)
 	if er != nil {
-		log.L.Fatalf("Couldn't initialize store: couldn't open database: %v", err.Error())
+		log.L.Fatalf("Couldn't initialize store: couldn't open database: %v", er.Error())
 	}
 }
 

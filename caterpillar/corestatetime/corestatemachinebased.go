@@ -97,11 +97,12 @@ func (c *MachineCaterpillar) Run(id string, recordCount int, state config.State,
 		if e, ok := i.(events.Event); ok {
 			count++
 			log.L.Debugf("Processing event %v", count)
-			lastTime = e.Timestamp
 			err = c.Machine.ProcessEvent(e)
 			if err != nil {
 				log.L.Errorf("Error procssing event: %v", err.Error())
+				continue
 			}
+			lastTime = e.Timestamp
 		} else {
 			log.L.Warnf("Unkown type in channel %v", i)
 		}

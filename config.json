@@ -2,6 +2,8 @@
     "name": "caterpillar",
     "port": "10012",
     "env-vars": [
+        "CLIENT_KEY",
+        "CLIENT_SECRET",
         "CONFIG_LOCATION",
         "DB_ADDRESS",
         "DB_PASSWORD",
@@ -9,6 +11,6 @@
         "ELK_DIRECT_ADDRESS",
         "ELK_SA_PASSWORD",
         "ELK_SA_USERNAME",
-        "WSO2_TOKEN"
+        "TOKEN_REFRESH_URL"
     ]
 }
