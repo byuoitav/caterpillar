@@ -1,29 +1,42 @@
 package main
 
 import (
-	"time"
+	"net/http"
 
-	"github.com/byuoitav/caterpillar/config"
 	"github.com/byuoitav/caterpillar/hatchery"
-	"github.com/byuoitav/caterpillar/hatchery/feeder"
-	"github.com/byuoitav/caterpillar/nydus"
 	"github.com/byuoitav/common/log"
+	"github.com/byuoitav/common/nerr"
+	"github.com/labstack/echo"
 )
+
+const port = ":10012"
+
+var hatch *hatchery.Hatchery
 
 func main() {
 	log.SetLevel("debug")
-	feeder.MaxSize = 8000
-	c, err := config.GetConfig()
+	var err *nerr.E
+	hatch, err = hatchery.InitializeHatchery()
 	if err != nil {
-		log.L.Fatal(err.Error())
+		log.L.Fatalf("%v", err.Error())
 	}
 
-	n, err := nydus.GetNetwork()
-	if err != nil {
-		log.L.Fatal(err.Error())
+	router := echo.New()
+
+	router.GET("/status", getStatus)
+
+	server := http.Server{
+		Addr:           port,
+		MaxHeaderBytes: 1024 * 10,
 	}
 
-	q := hatchery.SpawnQueen(c.Caterpillars[0], n.GetChannel())
-	q.Run()
-	time.Sleep(7 * time.Second)
+	router.StartServer(&server)
+}
+
+func getStatus(context echo.Context) error {
+	log.L.Debug("Getting status")
+	status := hatch.GetStatus()
+	log.L.Debugf("Status: %v", status)
+
+	return context.JSON(http.StatusOK, status)
 }

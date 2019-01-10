@@ -2,6 +2,7 @@ package hatchery
 
 import (
 	"sync"
+	"time"
 
 	"github.com/byuoitav/caterpillar/caterpillar"
 	"github.com/byuoitav/caterpillar/config"
@@ -12,7 +13,10 @@ import (
 )
 
 const (
-	running = "running"
+	running        = "running"
+	initialwaiting = "initial-waiting"
+	donewaiting    = "done-waiting"
+	errorwaiting   = "error-waiting"
 )
 
 //Queen .
@@ -21,25 +25,54 @@ type Queen struct {
 	config       config.Caterpillar
 	runMutex     *sync.Mutex
 	nydusChannel chan nydus.BulkRecordEntry
+
+	State     string
+	LastError string
+	LastRun   time.Time
+}
+
+//QueenStatus .
+type QueenStatus struct {
+	State         string             `json:"state"`
+	LastRun       time.Time          `json:"last-run"`
+	Configuration config.Caterpillar `json:"caterpillar-config"`
+	LastError     string             `json:"last-error,omitempty"`
 }
 
 //SpawnQueen .
-func SpawnQueen(c config.Caterpillar, nn chan nydus.BulkRecordEntry) Queen {
-	return Queen{
+func SpawnQueen(c config.Caterpillar, nn chan nydus.BulkRecordEntry) *Queen {
+	return &Queen{
 		config:       c,
 		runMutex:     &sync.Mutex{},
 		nydusChannel: nn,
+		State:        initialwaiting,
+	}
+}
+
+//GetStatus .
+func (q Queen) GetStatus() QueenStatus {
+	return QueenStatus{
+		State:         q.State,
+		LastRun:       q.LastRun,
+		Configuration: q.config,
+		LastError:     q.LastError,
 	}
 }
 
 //Run fulfills the job interface for the cron package.
-func (q Queen) Run() {
+func (q *Queen) Run() {
 
 	log.L.Debugf("Obtaining a run lock for %v", q.config.ID)
 
 	//wait for the lock
 	q.runMutex.Lock()
-	defer q.runMutex.Unlock()
+	q.State = running
+
+	defer func() {
+		q.runMutex.Unlock()
+		q.LastRun = time.Now()
+	}()
+
 	log.L.Infof("Starting run of %v.", q.config.ID)
 
 	//before we get the info from the store, we need to have the caterpillar
@@ -47,6 +80,8 @@ func (q Queen) Run() {
 	if err != nil {
 		log.L.Errorf(err.Addf("Couldn't get the caterpillar %v.", q.config.ID).Error())
 		log.L.Debugf("%s", err.Stack)
+		q.State = errorwaiting
+		q.LastError = err.Error()
 		return
 	}
 
@@ -58,6 +93,8 @@ func (q Queen) Run() {
 	if err != nil {
 		log.L.Errorf(err.Addf("Couldn't get information for caterpillar %v from info store. Returning.", q.config.ID).Error())
 		log.L.Debugf("%s", err.Stack)
+		q.LastError = err.Error()
+		q.State = errorwaiting
 		return
 	}
 	log.L.Debugf("State before run: %v", info)
@@ -67,6 +104,8 @@ func (q Queen) Run() {
 	if err != nil {
 		log.L.Errorf(err.Addf("Couldn't get feeder for %v from info store. Returning.", q.config.ID).Error())
 		log.L.Debugf("%s", err.Stack)
+		q.LastError = err.Error()
+		q.State = errorwaiting
 		return
 	}
 
@@ -74,6 +113,8 @@ func (q Queen) Run() {
 	if err != nil {
 		log.L.Errorf(err.Addf("Couldn't get event count from feeder for %v from info store. Returning.", q.config.ID).Error())
 		log.L.Debugf("%s", err.Stack)
+		q.LastError = err.Error()
+		q.State = errorwaiting
 		return
 	}
 
@@ -82,6 +123,8 @@ func (q Queen) Run() {
 	if err != nil {
 		log.L.Error(err.Addf("There was an error running caterpillar %v: %v", q.config.ID, err.Error()))
 		log.L.Debugf("%s", err.Stack)
+		q.LastError = err.Error()
+		q.State = errorwaiting
 		return
 	}
 
@@ -91,6 +134,12 @@ func (q Queen) Run() {
 	if err != nil {
 		log.L.Errorf(err.Addf("Couldn't store information for caterpillar %v to info store. Returning.", q.config.ID).Error())
 		log.L.Debugf("%s", err.Stack)
+		q.LastError = err.Error()
+		q.State = errorwaiting
 		return
 	}
+
+	q.LastError = ""
+	q.State = donewaiting
+
 }

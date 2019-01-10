@@ -8,6 +8,11 @@ import (
 	"github.com/byuoitav/common/nerr"
 )
 
+const (
+	//EventBufferInterval  is just so we can deal with events that are lagging a bit behind...
+	EventBufferInterval = -10 * time.Minute
+)
+
 //A Feeder handles the feeding of a caterpillar, providing it with data to work through.
 type Feeder interface {
 	GetCount() (int, *nerr.E)
@@ -30,7 +35,7 @@ func GetFeeder(c config.Caterpillar, lastEventTime time.Time) (Feeder, *nerr.E) 
 
 	e := &elkFeeder{
 		startTime:  lastEventTime,
-		endTime:    time.Now(),
+		endTime:    time.Now().Add(EventBufferInterval),
 		config:     c,
 		countOnce:  &sync.Once{},
 		countMutex: &sync.Mutex{},

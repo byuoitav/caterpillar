@@ -15,6 +15,13 @@ type Network struct {
 	timer     *time.Timer
 }
 
+//NetworkStatus .
+type NetworkStatus struct {
+	ChannelCap  int `json:"channel-cap"`
+	ChannelUtil int `json:"channel-util"`
+	BufferSize  int `json:"buffer-size"`
+}
+
 //BulkRecordEntry corresponds to a single record to be pushed back up to the ELK cluter.
 type BulkRecordEntry struct {
 	Header BulkRecordHeader
@@ -49,6 +56,15 @@ func GetNetwork() (*Network, *nerr.E) {
 	go toReturn.run()
 
 	return toReturn, nil
+}
+
+//GetStatus .
+func (n *Network) GetStatus() NetworkStatus {
+	return NetworkStatus{
+		ChannelCap:  cap(n.inChannel),
+		ChannelUtil: len(n.inChannel),
+		BufferSize:  len(n.curBuffer),
+	}
 }
 
 //GetChannel .

@@ -12,7 +12,7 @@
           "bool": {
             "must": [
               {"match": {"event-tags": "core-state"}},
-              {"match": {"affected-room.roomID": "ITB-1101"}}
+              {"match": {"affected-room.buildingID": "ITB"}}
             ]
           }
         }

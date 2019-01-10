@@ -92,7 +92,7 @@ func (c *MachineCaterpillar) Run(id string, recordCount int, state config.State,
 	}
 
 	count := 0
-	lastTime := time.Time{}
+	lastTime := state.LastEventTime
 	for i := range inchan {
 		if e, ok := i.(events.Event); ok {
 			count++
@@ -581,7 +581,6 @@ func GetDeviceAndRoomInfo() (map[string]ci.DeviceInfo, map[string]ci.RoomInfo, *
 	log.L.Infof("Initializing device list with %v devices", len(devs))
 
 	for i := range devs {
-		log.L.Debugf("%v", devs[i].ID)
 		tmp := ci.DeviceInfo{
 			ID:         devs[i].ID,
 			DeviceType: devs[i].Type.ID,
