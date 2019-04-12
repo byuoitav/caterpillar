@@ -26,6 +26,8 @@ type Caterpillar struct {
 	MaxInterval string            `json:"max-interval,omitempty"` //If there isn't a last run time how far back do we create events for. Defaults to forever.
 	TimeField   string            `json:"time-field"`             //The field in the elk index to use for time-based filtering. We'll use this to batch our requests for events.
 	TypeConfig  map[string]string `json:"type-config"`            //This is for configuration specific to that type. For example, output-index is a common field here.
+	AbsStart    string            `json:"absolute-start-time"`    //if you want to run a caterpillar on a specific time frame (non recurring). Must be defined with the AbsEnd. Format is YYYY-MM-DD hh:mm:ss. Caterpillar will exit after initial run if defined.
+	AbsEnd      string            `json:"absolute-end-time"`
 }
 
 var once sync.Once

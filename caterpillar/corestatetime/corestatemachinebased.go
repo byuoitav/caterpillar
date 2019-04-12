@@ -433,7 +433,40 @@ func (c *MachineCaterpillar) AddMetaInfo(startTime time.Time, e events.Event, r 
 		return []ci.MetricsRecord{r}, err
 	}
 
-	return AddClassTimes(startTime, e.Timestamp, r)
+	records, err := AddClassTimes(startTime, e.Timestamp, r)
+	if err != nil {
+		return records, err
+	}
+
+	newRecords := []ci.MetricsRecord{}
+
+	//otherwise we check for records that cross over midnight
+	for _, cur := range records {
+		log.L.Debugf("Checking for multi-day transition of %v - %v", cur.StartTime.In(location), cur.EndTime.In(location))
+
+		for cur.EndTime.In(location).After(endOfDay(cur.StartTime.In(location))) {
+			log.L.Debugf("Record splits over midnight %v - %v", cur.StartTime.In(location), cur.EndTime.In(location))
+			//we need to split at midnight
+			second := cur
+			//reset the time elapsed
+			cur.EndTime = endOfDay(cur.StartTime.In(location))
+			cur.ElapsedInSeconds = int64((cur.EndTime.Sub(cur.StartTime)) / time.Second)
+
+			log.L.Debugf("Adding record %v-%v", cur.StartTime.In(location), cur.EndTime.In(location))
+			newRecords = append(newRecords, cur)
+
+			log.L.Debugf("Changing date from %v to %v", second.StartTime.In(location), second.StartTime.AddDate(0, 0, 1).In(location))
+			//get start time of the day after the current start time
+			second.StartTime = startOfDay(second.StartTime.AddDate(0, 0, 1).In(location))
+			second.ElapsedInSeconds = int64((second.EndTime.Sub(second.StartTime)) / time.Second)
+
+			cur = second
+			log.L.Debugf("Left over record: %v-%v", second.StartTime.In(location), second.EndTime.In(location))
+		}
+
+		newRecords = append(newRecords, cur)
+	}
+	return newRecords, nil
 }
 
 //RegisterGobStructs .
@@ -478,6 +511,12 @@ func AddClassTimes(start, end time.Time, r ci.MetricsRecord) ([]ci.MetricsRecord
 	for _, v := range schedules {
 		v.StartTime.Add(adjust)
 		v.EndTime.Add(adjust)
+		//check to see if it's a duplicate
+
+		if v.StartTime.Before(lastClassEnd) {
+			log.L.Debugf("Overlapping class, skipping.")
+			continue
+		}
 
 		curInfo := ci.ClassInfo{
 			DeptName:        v.DeptName,
@@ -498,7 +537,7 @@ func AddClassTimes(start, end time.Time, r ci.MetricsRecord) ([]ci.MetricsRecord
 			tmp := r
 			tmp.StartTime = lastClassEnd
 			tmp.EndTime = v.StartTime
-			tmp.ElapsedInSeconds = int64((end.Sub(start)) / time.Second)
+			tmp.ElapsedInSeconds = int64((tmp.EndTime.Sub(tmp.StartTime)) / time.Second)
 
 			log.L.Debugf("Adding front-padded time block %v %v ", tmp.StartTime.In(time.Local), tmp.EndTime.In(time.Local))
 			toReturn = append(toReturn, tmp)
@@ -513,7 +552,7 @@ func AddClassTimes(start, end time.Time, r ci.MetricsRecord) ([]ci.MetricsRecord
 		tmp := r
 		tmp.StartTime = v.StartTime
 		tmp.EndTime = tmpend
-		tmp.ElapsedInSeconds = int64((end.Sub(start)) / time.Second)
+		tmp.ElapsedInSeconds = int64((tmp.EndTime.Sub(tmp.StartTime)) / time.Second)
 		tmp.Class = curInfo
 		toReturn = append(toReturn, tmp)
 		log.L.Debugf("Adding class time block for %v from %v to %v ", tmp.Class.ClassName, tmp.StartTime.In(time.Local), tmp.EndTime.In(time.Local))
@@ -526,7 +565,7 @@ func AddClassTimes(start, end time.Time, r ci.MetricsRecord) ([]ci.MetricsRecord
 		tmp := r
 		tmp.StartTime = lastClassEnd
 		tmp.EndTime = end
-		tmp.ElapsedInSeconds = int64((end.Sub(start)) / time.Second)
+		tmp.ElapsedInSeconds = int64((tmp.EndTime.Sub(tmp.StartTime)) / time.Second)
 		log.L.Debugf("Adding back-padded time block %v %v ", tmp.StartTime.In(time.Local), tmp.EndTime.In(time.Local))
 
 		toReturn = append(toReturn, tmp)
@@ -614,4 +653,14 @@ func GetDeviceAndRoomInfo() (map[string]ci.DeviceInfo, map[string]ci.RoomInfo, *
 	}
 
 	return toReturnDevice, toReturnRooms, nil
+}
+
+func startOfDay(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
+}
+
+func endOfDay(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 23, 59, 59, int(time.Second-time.Nanosecond), t.Location())
 }

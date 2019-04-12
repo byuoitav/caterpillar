@@ -4,15 +4,17 @@
       "id": "CoreStateTime",
       "type": "core-state-time-machine",
       "index": "av-delta-events*",
-      "interval": "0 * * * * *",
+      "interval": "15 * * * * *",
       "time-field": "timestamp",
-      "max-interval": "12h",
+      "max-interval": "10000h",
+      "aaabsolute-start-time": "2019-04-02 00:00:00",
+      "aaabsolute-end-time": "2019-04-04 01:00:00",
       "query": {
         "query": {
           "bool": {
             "must": [
-              {"match": {"event-tags": "core-state"}},
-              {"match": {"affected-room.buildingID": "ITB"}}
+              {"term": {"event-tags.keyword": "core-state"}},
+              {"term": {"target-device.buildingID.keyword": "TNRB"}}
             ]
           }
         }
