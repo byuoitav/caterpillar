@@ -12,10 +12,7 @@
       "query": {
         "query": {
           "bool": {
-            "must": [
-              {"term": {"event-tags.keyword": "core-state"}},
-              {"term": {"target-device.buildingID.keyword": "TNRB"}}
-            ]
+            "must": [{"term": {"event-tags.keyword": "core-state"}}]
           }
         }
       },
