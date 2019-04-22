@@ -382,10 +382,18 @@ func UnBlankStore(state map[string]interface{}, e events.Event) ([]ci.MetricsRec
 
 //InputStore .
 func InputStore(state map[string]interface{}, e events.Event) ([]ci.MetricsRecord, *nerr.E) {
+
+	curInput, ok := state["input"]
+
+	if ok && curInput == e.Value {
+		return []ci.MetricsRecord{}, nil
+	}
+
 	if e.Key == "input" && e.Value != "" {
 		state["input-set"] = e.Timestamp
 		state["input"] = e.Value
 	}
+
 	return []ci.MetricsRecord{}, nil
 }
 
