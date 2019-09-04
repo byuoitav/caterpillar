@@ -29,7 +29,7 @@ func SpawnWorm(entries []BulkRecordEntry) {
 			log.L.Errorf("Couldn't marshal body %v", entries[i].Body)
 			continue
 		}
-
+		
 		body = append(body, hb...)
 		body = append(body, newline...)
 		body = append(body, bb...)

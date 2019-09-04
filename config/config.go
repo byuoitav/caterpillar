@@ -44,8 +44,9 @@ func init() {
 func GetConfig() (Config, *nerr.E) {
 	configMutex.Lock()
 	once.Do(func() {
-		var file string
-		if file = os.Getenv("CONFIG_LOCATION"); file == "" {
+		file := os.Getenv("CONFIG_LOCATION")
+
+		if file == "" {
 			file = "./service-config.json"
 		}
 

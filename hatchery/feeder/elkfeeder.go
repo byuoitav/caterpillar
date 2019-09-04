@@ -67,14 +67,14 @@ func (e *elkFeeder) getElkCount() (int, *nerr.E) {
 		}
 	} else {
 		//error
-		return 0, nerr.Create(fmt.Sprintf("Invalid caterpillar config for %v. Must specify eighte query or query-file.", e.config.ID), "invalid-config")
+		return 0, nerr.Create(fmt.Sprintf("Invalid caterpillar config for %v. Must specify either query or query-file.", e.config.ID), "invalid-config")
 	}
 
 	e.baseQuery = query
 
 	q, err := e.getCountQuery()
 	if err != nil {
-		return 0, err.Addf("Couln't get count for caterpillar %v", e.config.ID)
+		return 0, err.Addf("Couldn't get count for caterpillar %v", e.config.ID)
 	}
 
 	queryBytes, er := json.Marshal(q)
@@ -84,14 +84,14 @@ func (e *elkFeeder) getElkCount() (int, *nerr.E) {
 
 	respBytes, err := elk.MakeELKRequest("POST", fmt.Sprintf("/%v/_count", e.config.Index), queryBytes)
 	if err != nil {
-		return 0, err.Addf("COuldn't get count of documents for caterpillar %v", e.config.ID)
+		return 0, err.Addf("Couldn't get count of documents for caterpillar %v", e.config.ID)
 	}
 
 	var cr queries.CountResponse
 
 	er = json.Unmarshal(respBytes, &cr)
 	if er != nil {
-		return 0, nerr.Translate(er).Addf("Couldn't get count. Unkown response %s", respBytes)
+		return 0, nerr.Translate(er).Addf("Couldn't get count. Unknown response %s", respBytes)
 	}
 	e.eventcount = cr.Count
 
@@ -111,7 +111,7 @@ func (e *elkFeeder) StartFeeding(capacity int) (chan interface{}, *nerr.E) {
 	e.curWindowStart = e.startTime
 	vals, err := e.getNextBatch()
 	if err != nil {
-		return e.eventChannel, err.Addf("Couldn't start feeing. Couldn't get initial batch.")
+		return e.eventChannel, err.Addf("Couldn't start feeding. Couldn't get initial batch.")
 	}
 
 	//otherwise we start our feeder.
@@ -127,7 +127,7 @@ func (e *elkFeeder) run(events []interface{}) {
 	}()
 
 	var err *nerr.E
-	log.L.Infof("Starting feeing caterpillar %v. Initial round size %v", e.config.ID, len(events))
+	log.L.Infof("Starting feeding caterpillar %v. Initial round size %v", e.config.ID, len(events))
 
 	for {
 		for i := range events {

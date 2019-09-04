@@ -7,8 +7,8 @@
       "interval": "15 * * * * *",
       "time-field": "timestamp",
       "max-interval": "10000h",
-      "aaabsolute-start-time": "2019-04-02 00:00:00",
-      "aaabsolute-end-time": "2019-04-04 01:00:00",
+      "not-used-absolute-start-time": "2019-04-02 00:00:00",
+      "not-used-absolute-end-time": "2019-04-04 01:00:00",
       "query": {
         "query": {
           "bool": {

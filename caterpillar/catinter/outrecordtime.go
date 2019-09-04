@@ -24,8 +24,9 @@ type MetricsRecord struct {
 	Building BuildingInfo `json:"building,omitempty"`
 	Class    ClassInfo    `json:"class,omitempty"`
 
-	Input     string `json:"input,omitempty"`
-	InputType string `json:"input-type,omitempty"`
+	Input             string `json:"input,omitempty"`
+	InputType         string `json:"input-type,omitempty"`
+	InputActiveSignal *bool  `json:"input-active-signal,omitempty"`
 
 	Volume     *int   `json:"volume,omitempty"`
 	Blanked    *bool  `json:"blanked,omitempty"`
