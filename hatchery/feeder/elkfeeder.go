@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/byuoitav/caterpillar/config"
-	"github.com/byuoitav/caterpillar/queries"
+	"github.com/byuoitav/caterpillar/v2/elkquery"
 	"github.com/byuoitav/common/log"
 	"github.com/byuoitav/common/nerr"
 	"github.com/byuoitav/state-parser/elk"
@@ -28,7 +28,7 @@ type elkFeeder struct {
 
 	curWindowStart time.Time
 	windowLength   time.Duration
-	baseQuery      queries.ELKQueryTemplate
+	baseQuery      elkquery.QueryTemplate
 
 	countMutex *sync.Mutex
 	countErr   *nerr.E
@@ -47,7 +47,7 @@ func (e *elkFeeder) GetCount() (int, *nerr.E) {
 
 func (e *elkFeeder) getElkCount() (int, *nerr.E) {
 	var err *nerr.E
-	var query queries.ELKQueryTemplate
+	var query elkquery.QueryTemplate
 
 	//get the query
 	if e.config.QueryFile != "" {
@@ -150,7 +150,7 @@ func (e *elkFeeder) run(events []interface{}) {
 	}
 }
 
-func (e *elkFeeder) executeQuery(q queries.ELKQueryTemplate) (queries.QueryResponse, *nerr.E) {
+func (e *elkFeeder) executeQuery(q elkquery.QueryTemplate) (queries.QueryResponse, *nerr.E) {
 
 	b, er := json.Marshal(q)
 	if er != nil {
@@ -217,7 +217,7 @@ func (e *elkFeeder) getNextBatch() ([]interface{}, *nerr.E) {
 	return events, nil
 }
 
-func (e *elkFeeder) splitQuery(q queries.ELKQueryTemplate) ([]interface{}, *nerr.E) {
+func (e *elkFeeder) splitQuery(q elkquery.QueryTemplate) ([]interface{}, *nerr.E) {
 	//take our query, assert that the last filter there is TimeRangeFilter that was added by getNextQuery
 	curTimeFilter, ok := q.Query.Bool.Filter[len(q.Query.Bool.Filter)-1].(queries.TimeRangeFilter)
 	if !ok {
@@ -254,7 +254,7 @@ func (e *elkFeeder) splitQuery(q queries.ELKQueryTemplate) ([]interface{}, *nerr
 	return events, nil
 }
 
-func buildQuery(base queries.ELKQueryTemplate, StartTime, EndTime time.Time, timefield string) (queries.ELKQueryTemplate, *nerr.E) {
+func buildQuery(base elkquery.QueryTemplate, StartTime, EndTime time.Time, timefield string) (elkquery.QueryTemplate, *nerr.E) {
 
 	//check to see if we're out of window.
 	if StartTime.After(EndTime) || StartTime.Equal(EndTime) {
@@ -282,7 +282,7 @@ func buildQuery(base queries.ELKQueryTemplate, StartTime, EndTime time.Time, tim
 	return base, nil
 }
 
-func (e *elkFeeder) getCountQuery() (queries.ELKQueryTemplate, *nerr.E) {
+func (e *elkFeeder) getCountQuery() (elkquery.QueryTemplate, *nerr.E) {
 
 	base := e.baseQuery
 	//check to see if we're out of window.
@@ -303,7 +303,7 @@ func (e *elkFeeder) getCountQuery() (queries.ELKQueryTemplate, *nerr.E) {
 }
 
 //getNextQuery is not idempotent. It will increment current window start to be the end of the query just sent.
-func (e *elkFeeder) getNextQuery() (queries.ELKQueryTemplate, *nerr.E) {
+func (e *elkFeeder) getNextQuery() (elkquery.QueryTemplate, *nerr.E) {
 	curQuery := e.baseQuery
 
 	//check to see if we're out of window.

@@ -1,18 +1,20 @@
-package queries
+package elkquery
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"time"
 
 	"github.com/byuoitav/common/nerr"
 	"github.com/byuoitav/common/v2/events"
+	"github.com/byuoitav/shipwright/elk"
 )
 
-//ELKQueryTemplate shows the template that we use for elk queries. The queries specified for a specific caterpillar wil be unmarshalled into this structure.
+//QueryTemplate shows the template that we use for elk queries. The queries specified for a specific caterpillar wil be unmarshalled into this structure.
 //Becasue we may have to batch documents from ELK the query should NOT include a date/time range query. This will be added by the feeder as it retreives data.
-type ELKQueryTemplate struct {
-	Query  ElkQueryDSL         `json:"query,omitempty"`
+type QueryTemplate struct {
+	Query  QueryDSL            `json:"query,omitempty"`
 	Aggs   interface{}         `json:"aggs,omitempty"`
 	From   int                 `json:"from,omitempty"`
 	Size   int                 `json:"size,omitempty"`
@@ -20,13 +22,13 @@ type ELKQueryTemplate struct {
 	Source interface{}         `json:"_source,omitempty"`
 }
 
-//ElkQueryDSL .
-type ElkQueryDSL struct {
-	Bool ElkBoolQueryDSL `json:"bool,omitempty"`
+//QueryDSL .
+type QueryDSL struct {
+	Bool BoolQueryDSL `json:"bool,omitempty"`
 }
 
-//ElkBoolQueryDSL .
-type ElkBoolQueryDSL struct {
+//BoolQueryDSL .
+type BoolQueryDSL struct {
 	Must               interface{}   `json:"must,omitempty"`
 	Should             interface{}   `json:"should,omitempty"`
 	MustNot            interface{}   `json:"must_not,omitempty"`
@@ -70,27 +72,50 @@ type QueryResponse struct {
 			Source events.Event `json:"_source"`
 		} `json:"hits"`
 	} `json:"hits"`
+	Aggregations interface{} `json:"aggregations"`
 }
 
 //GetQueryTemplateFromFile .
-func GetQueryTemplateFromFile(file string) (ELKQueryTemplate, *nerr.E) {
+func GetQueryTemplateFromFile(file string) (QueryTemplate, *nerr.E) {
 
 	b, err := ioutil.ReadFile(file)
 	if err != nil {
-		return ELKQueryTemplate{}, nerr.Translate(err).Addf("couldn't get query template from file. Couldn't read file %v.", file)
+		return QueryTemplate{}, nerr.Translate(err).Addf("couldn't get query template from file. Couldn't read file %v.", file)
 	}
 
 	return GetQueryTemplateFromString(b)
 }
 
 // GetQueryTemplateFromString .
-func GetQueryTemplateFromString(query []byte) (ELKQueryTemplate, *nerr.E) {
-	toReturn := ELKQueryTemplate{}
+func GetQueryTemplateFromString(query []byte) (QueryTemplate, *nerr.E) {
+	toReturn := QueryTemplate{}
 
 	//we unmarshal
 	err := json.Unmarshal(query, &toReturn)
 	if err != nil {
 		return toReturn, nerr.Translate(err).Addf("Couldn't get Query from string.")
+	}
+
+	return toReturn, nil
+}
+
+//ExecuteElkQuery ...
+func ExecuteElkQuery(indexName string, q QueryTemplate) (QueryResponse, *nerr.E) {
+
+	b, er := json.Marshal(q)
+	if er != nil {
+		return QueryResponse{}, nerr.Translate(er).Addf("Couldn't execute query.")
+	}
+
+	resp, err := elk.MakeELKRequest("POST", fmt.Sprintf("/%v/_search", indexName), b)
+	if err != nil {
+		return QueryResponse{}, err.Addf("COuldn't get count of documents for index name %v", indexName)
+	}
+	var toReturn QueryResponse
+
+	er = json.Unmarshal(resp, &toReturn)
+	if er != nil {
+		return QueryResponse{}, nerr.Translate(er).Addf("Couldn't execute query.")
 	}
 
 	return toReturn, nil
