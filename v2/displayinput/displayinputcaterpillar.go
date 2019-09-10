@@ -407,7 +407,8 @@ func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 	//slice up the record on each hour, as well as class schedule boundaries
 
 	for {
-		log.L.Debugf("slicing from %v to %v", recordToSlice.StartTime, recordToSlice.EndTime)
+		log.L.Debugf("slicing from %v to %v", recordToSlice.StartTime, recordToSlice.EndTime
+	)
 
 		//see if we have crossed to a different day
 		if recordToSlice.StartTime.Truncate(24*time.Hour) != classScheduleDate {
