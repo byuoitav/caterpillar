@@ -1,6 +1,7 @@
 package caterpillarmssql
 
 import (
+	"database/sql"
 	"os"
 
 	"github.com/byuoitav/common/log"
@@ -26,5 +27,17 @@ func GetDB() (*sqlx.DB, error) {
 		log.L.Debugf("Error connecting to SQL %v", err.Error())
 		return nil, err
 	}
+	return db, nil
+}
+
+//GetRawDB ..
+func GetRawDB() (*sql.DB, error) {
+	db, err := sql.Open("mssql", connString)
+
+	if err != nil {
+		log.L.Debugf("Error connecting to SQL %v", err.Error())
+		return nil, err
+	}
+
 	return db, nil
 }

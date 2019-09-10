@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	mssql "github.com/denisenkom/go-mssqldb"
+
 	"github.com/byuoitav/caterpillar/v2/caterpillarmssql"
 	"github.com/byuoitav/caterpillar/v2/elkquery"
 	"github.com/byuoitav/common/log"
@@ -349,9 +351,9 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 	//update last state known in sql
 	lastKnownStateUpdateQuery :=
 		`UPDATE LastKnownStates
-		SET LastKnownStateTime = @LastKnownStateTime,
-		LastKnownStateJSON = @LastKnownStateJSON
-		where DeviceID = @DeviceID`
+		SET LastKnownStateTime = @p1,
+		LastKnownStateJSON = @p2
+		where DeviceID = @p3`
 
 	lastKnownStateJSON, err := json.Marshal(currentState)
 
@@ -405,7 +407,7 @@ func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 	//slice up the record on each hour, as well as class schedule boundaries
 
 	for {
-		//log.L.Debugf("slicing from %v to %v", recordToSlice.StartTime, recordToSlice.EndTime)
+		log.L.Debugf("slicing from %v to %v", recordToSlice.StartTime, recordToSlice.EndTime)
 
 		//see if we have crossed to a different day
 		if recordToSlice.StartTime.Truncate(24*time.Hour) != classScheduleDate {
@@ -419,17 +421,26 @@ func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 			hourEndTime = recordToSlice.EndTime
 		}
 
+		//assume no class unless we find one
+		recordToSlice.IsClass = false
+		recordToSlice.TeachingArea = ""
+		recordToSlice.CourseNumber = ""
+		recordToSlice.SectionNumber = ""
+		recordToSlice.ClassName = ""
+		recordToSlice.ScheduleType = ""
+		recordToSlice.InstructorName = ""
+
 		copy := recordToSlice
 
-		minTime := hourEndTime
 		//see if we have any classes that have a start date or end date between our start and end time - if we do, that becomes the new end time
 		for _, classSchedule := range classSchedules {
 
-			if classSchedule.StartDateTime.After(minTime) {
+			if classSchedule.StartDateTime.After(hourEndTime) {
 				continue
 			}
 
-			if classSchedule.StartDateTime.Before(minTime) &&
+			//see if we need to adjust the time of this slice
+			if classSchedule.StartDateTime.Before(hourEndTime) &&
 				classSchedule.StartDateTime.After(recordToSlice.StartTime) &&
 				classSchedule.StartDateTime.Before(recordToSlice.EndTime) {
 				//there is a class that starts in the middle of our block
@@ -437,18 +448,20 @@ func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 				hourEndTime = classSchedule.StartDateTime
 				//log.L.Debugf("New end time - start of a class %v", hourEndTime)
 
-			} else if classSchedule.EndDateTime.Before(minTime) &&
+			} else if classSchedule.EndDateTime.Before(hourEndTime) &&
 				classSchedule.EndDateTime.After(recordToSlice.StartTime) &&
 				classSchedule.EndDateTime.Before(recordToSlice.EndTime) {
 				//there is class that ends in the middle of our block, but started before
 				hourEndTime = classSchedule.EndDateTime
 				//log.L.Debugf("New end time - end of a class %v", hourEndTime)
-
 			}
 
-			if classSchedule.StartDateTime.Equal(recordToSlice.StartTime) {
-				//our block is starting a new class
-				//log.L.Debugf("Block starting a class")
+			//now see if this slice is part of the class or not
+			if (classSchedule.StartDateTime.Equal(recordToSlice.StartTime) ||
+				classSchedule.StartDateTime.Before(recordToSlice.StartTime)) &&
+				(classSchedule.EndDateTime.Equal(hourEndTime) ||
+					classSchedule.EndDateTime.After(hourEndTime)) {
+				//the whole block is in our class
 				recordToSlice.IsClass = true
 				recordToSlice.TeachingArea = classSchedule.TeachingArea
 				recordToSlice.CourseNumber = classSchedule.CourseNumber
@@ -458,19 +471,6 @@ func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 				recordToSlice.InstructorName = strings.Join(classSchedule.InstructorNames, "|")
 
 				copy = recordToSlice
-
-			} else if classSchedule.EndDateTime.Equal(hourEndTime) {
-				//our block is ending at the same time as the class
-				//log.L.Debugf("Block ending a class")
-				recordToSlice.IsClass = false
-				recordToSlice.TeachingArea = ""
-				recordToSlice.CourseNumber = ""
-				recordToSlice.SectionNumber = ""
-				recordToSlice.ClassName = ""
-				recordToSlice.ScheduleType = ""
-				recordToSlice.InstructorName = ""
-
-				//don't do copy - only future for next round
 			}
 		}
 
@@ -486,8 +486,8 @@ func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 
 		//send the sliced record to the storage go routine
 		//DEBUG DEBUG
-		//storeChannel <- copy
-		storeRecordInSQL(copy)
+		storeChannel <- copy
+		//storeRecordInSQL(copy)
 
 		//stop if we've done all of it
 		if hourEndTime.Equal(recordToSlice.EndTime) {
@@ -502,15 +502,24 @@ func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 func storeRecord(storeChannel chan MetricsRecord, recordReadyDoneChannel chan bool, wg *sync.WaitGroup) {
 	defer wg.Done()
 
+	var RecordsToStore []MetricsRecord
+
 	//wait for something to come down the channel
+ChannelLoop:
 	for {
 		select {
 		case recordToStore := <-storeChannel:
-			storeRecordInKibana(recordToStore)
-			storeRecordInSQL(recordToStore)
+			//storeRecordInKibana(recordToStore)
+			//storeRecordInSQL(recordToStore)
+			RecordsToStore = append(RecordsToStore, recordToStore)
 		case <-recordReadyDoneChannel:
-			return
+			break ChannelLoop
 		}
+	}
+
+	//do the bulk insert
+	if len(RecordsToStore) > 0 {
+		bulkInsertToSQL(RecordsToStore)
 	}
 }
 
@@ -518,103 +527,110 @@ func storeRecordInKibana(recordToStore MetricsRecord) {
 
 }
 
-func storeRecordInSQL(recordToStore MetricsRecord) {
+func bulkInsertToSQL(recordsToStore []MetricsRecord) {
 
-	log.L.Debugf("storing record in %v - %v to %v, class %v, StatusDesc %v",
-		recordToStore.DeviceID, recordToStore.StartTime,
-		recordToStore.EndTime, recordToStore.ClassName, recordToStore.StatusDesc)
-	return
-	db, err := caterpillarmssql.GetDB()
+	log.L.Debugf("storing  %v records to SQL for device %v",
+		len(recordsToStore), recordsToStore[0].DeviceID)
+
+	db, err := caterpillarmssql.GetRawDB()
+
 	if err != nil {
-		log.L.Errorf("Unable to get db to store record on device %v: %v", recordToStore.DeviceID, err.Error())
+		log.L.Errorf("Unable to get raw db to store records on device %v: %v", recordsToStore[0].DeviceID, err.Error())
 		return
 	}
 
-	q :=
-		`INSERT INTO DisplayInputMetrics
-	(
-		DeviceID,
-		RoomID,
-		BuildingID,
-		StartTime,
-		EndTime,
-		ExceptionDateType,
-		StartHour,
-		StartDayOfWeek,
-		StartMonth,
-		StartYear,
-		ElapsedSeconds,
-		IsClass,
-		TeachingArea,
-		CourseNumber,
-		SectionNumber,
-		ClassName,
-		ScheduleType,
-		InstructorName,
-		Power,
-		Blanked,
-		InputType,
-		Input,
-		InputActiveSignal,
-		StatusDesc
-	)
-		VALUES 
-	(
-		@p1,
-		@p2,
-		@p3,
-		@p4,
-		@p5,
-		@p6,
-		@p7,
-		@p8,
-		@p9,
-		@p10,
-		@p11,
-		@p12,
-		@p13,
-		@p14,
-		@p15,
-		@p16,
-		@p17,
-		@p18,
-		@p19,
-		@p20,
-		@p21,
-		@p22,
-		@p23,
-		@p24
-	)`
+	defer db.Close()
 
-	_, err = db.Exec(q,
-		recordToStore.DeviceID,
-		recordToStore.RoomID,
-		recordToStore.BuildingID,
-		recordToStore.StartTime,
-		recordToStore.EndTime,
-		recordToStore.ExceptionDateType,
-		recordToStore.StartHour,
-		recordToStore.StartDayOfWeek,
-		recordToStore.StartMonth,
-		recordToStore.StartYear,
-		recordToStore.ElapsedSeconds,
-		recordToStore.IsClass,
-		recordToStore.TeachingArea,
-		recordToStore.CourseNumber,
-		recordToStore.SectionNumber,
-		recordToStore.ClassName,
-		recordToStore.ScheduleType,
-		recordToStore.InstructorName,
-		recordToStore.Power,
-		recordToStore.Blanked,
-		recordToStore.InputType,
-		recordToStore.Input,
-		recordToStore.InputActiveSignal,
-		recordToStore.StatusDesc)
+	txn, err := db.Begin()
 
 	if err != nil {
-		log.L.Errorf("db error when storing record on device %v: %v", recordToStore.DeviceID, err.Error())
+		log.L.Errorf("Unable to start txn to store records on device %v: %v", recordsToStore[0].DeviceID, err.Error())
+		return
 	}
 
-	log.L.Debugf("record stored in %v", recordToStore.DeviceID)
+	stmt, err := txn.Prepare(mssql.CopyIn("DisplayInputMetrics", mssql.BulkOptions{},
+		"DeviceID",
+		"RoomID",
+		"BuildingID",
+		"StartTime",
+		"EndTime",
+		"ExceptionDateType",
+		"StartHour",
+		"StartDayOfWeek",
+		"StartMonth",
+		"StartYear",
+		"ElapsedSeconds",
+		"IsClass",
+		"TeachingArea",
+		"CourseNumber",
+		"SectionNumber",
+		"ClassName",
+		"ScheduleType",
+		"InstructorName",
+		"Power",
+		"Blanked",
+		"InputType",
+		"Input",
+		"InputActiveSignal",
+		"StatusDesc",
+	))
+
+	if err != nil {
+		log.L.Errorf("Unable to start copy in to store records on device %v: %v", recordsToStore[0].DeviceID, err.Error())
+		return
+	}
+
+	for i, recordToStore := range recordsToStore {
+		_, err = stmt.Exec(
+			recordToStore.DeviceID,
+			recordToStore.RoomID,
+			recordToStore.BuildingID,
+			recordToStore.StartTime,
+			recordToStore.EndTime,
+			recordToStore.ExceptionDateType,
+			recordToStore.StartHour,
+			recordToStore.StartDayOfWeek,
+			recordToStore.StartMonth,
+			recordToStore.StartYear,
+			recordToStore.ElapsedSeconds,
+			recordToStore.IsClass,
+			recordToStore.TeachingArea,
+			recordToStore.CourseNumber,
+			recordToStore.SectionNumber,
+			recordToStore.ClassName,
+			recordToStore.ScheduleType,
+			recordToStore.InstructorName,
+			recordToStore.Power,
+			recordToStore.Blanked,
+			recordToStore.InputType,
+			recordToStore.Input,
+			recordToStore.InputActiveSignal,
+			recordToStore.StatusDesc)
+
+		if err != nil {
+			log.L.Errorf("db error when storing record %v on device %v: %v", i, recordToStore.DeviceID, err.Error())
+		}
+	}
+
+	result, err := stmt.Exec()
+
+	if err != nil {
+		log.L.Errorf("Error executing statement on device %v: %v", recordsToStore[0].DeviceID, err.Error())
+	}
+
+	err = stmt.Close()
+
+	if err != nil {
+		log.L.Errorf("Error closing statement on device %v: %v", recordsToStore[0].DeviceID, err.Error())
+	}
+
+	err = txn.Commit()
+
+	if err != nil {
+		log.L.Errorf("Error committing txn on device %v: %v", recordsToStore[0].DeviceID, err.Error())
+	}
+
+	x, _ := result.RowsAffected()
+
+	log.L.Debugf("%v record stored in %v", x, recordsToStore[0].DeviceID)
 }
