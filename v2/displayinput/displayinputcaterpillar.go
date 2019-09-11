@@ -38,15 +38,17 @@ type lastKnownState struct {
 
 //MetricsRecord ...
 type MetricsRecord struct {
-	DeviceID   string `json:"DeviceID" db:"DeviceID"`
-	RoomID     string `json:"RoomID" db:"RoomID"`
-	BuildingID string `json:"BuildingID" db:"BuildingID"`
+	DeviceID       string `json:"DeviceID" db:"DeviceID"`
+	RoomID         string `json:"RoomID" db:"RoomID"`
+	BuildingID     string `json:"BuildingID" db:"BuildingID"`
+	DeviceIDPrefix string `json:"DeviceIDPrefix" db:"DeviceIDPrefix"`
 
 	StartTime         time.Time `json:"StartTime" db:"StartTime"`
 	EndTime           time.Time `json:"EndTime" db:"EndTime"`
 	ExceptionDateType string    `json:"ExceptionDateType" db:"ExceptionDateType"`
 	StartHour         int       `json:"StartHour" db:"StartHour"`
 	StartDayOfWeek    int       `json:"StartDayOfWeek" db:"StartDayOfWeek"`
+	StartDay          int       `json:"StartDay" db:"StartDay"`
 	StartMonth        int       `json:"StartMonth" db:"StartMonth"`
 	StartYear         int       `json:"StartYear" db:"StartYear"`
 	ElapsedSeconds    int       `json:"ElapsedSeconds" db:"ElapsedSeconds"`
@@ -86,8 +88,6 @@ func startDisplayInputCaterpillar() {
 		log.L.Fatalf("Unable to get min last known state time %v", err)
 	}
 
-	//log.L.Debugf("%v", lastKnownStateTime.LastKnownStateTime)
-
 	//run the aggregation query to get the list of devices
 	q := `
 	{
@@ -105,12 +105,7 @@ func startDisplayInputCaterpillar() {
 				"terms": {
 				  "key": [ "input", "power", "active-signal", "blanked"  ]
 				}
-			  },
-			  {
-				  "term": {
-					  "target-device.deviceID": "B66-120-D1"
-				  }
-			  }
+			  }			  
 			]
 		  }
 		},
@@ -128,7 +123,7 @@ func startDisplayInputCaterpillar() {
 	  
 	`
 
-	q = strings.ReplaceAll(q, "$STARTDATE", lastKnownStateTime.LastKnownStateTime.Format("2006-01-01T15:04-07:00"))
+	q = strings.ReplaceAll(q, "$STARTDATE", lastKnownStateTime.LastKnownStateTime.Format("2006-01-02T15:04-07:00"))
 	query, nerr := elkquery.GetQueryTemplateFromString([]byte(q))
 	if nerr != nil {
 		log.L.Fatalf("Unable to translate query string %v", nerr)
@@ -193,20 +188,6 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 		myLastKnownState = myLastKnownStateSlice[0]
 	}
 
-	//Delete anything in SQL / Kibana that is older than the date we're starting at (so if we're redoing we don't have to worry about duplicates)
-	log.L.Debugf("Removing future records for %v", deviceName)
-	deleteQuery :=
-		`DELETE
-		FROM DisplayInputMetrics
-		WHERE DeviceID = @p1 and StartTime >= @p2`
-
-	_, err = db.Exec(deleteQuery, deviceName, myLastKnownState.LastKnownStateTime)
-
-	if err != nil {
-		log.L.Errorf("Unable to remove future Metrics records for %v: %v", deviceName, err.Error())
-		return
-	}
-
 	//unmarshal from the DB into an object
 	var currentState MetricsRecord
 
@@ -218,6 +199,7 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 			DeviceID:          deviceName,
 			RoomID:            roomParts[0] + "-" + roomParts[1],
 			BuildingID:        roomParts[0],
+			DeviceIDPrefix:    strings.TrimRight(roomParts[2], "0123456789"),
 			Power:             "unknown",
 			Blanked:           "unknown",
 			InputType:         "unknown",
@@ -256,7 +238,8 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 	  "sort": [ { "timestamp": "asc" } ]  
 	}`
 
-	getEventsQuery = strings.ReplaceAll(getEventsQuery, "$STARTDATE", currentState.StartTime.Format("2006-01-01T15:04-07:00"))
+	log.L.Debugf("Querying events for %v after %v", deviceName, currentState.StartTime.Format("2006-01-02T15:04-07:00"))
+	getEventsQuery = strings.ReplaceAll(getEventsQuery, "$STARTDATE", currentState.StartTime.Format("2006-01-02T15:04-07:00"))
 	getEventsQuery = strings.ReplaceAll(getEventsQuery, "$DEVICEID", deviceName)
 
 	query, nerr := elkquery.GetQueryTemplateFromString([]byte(getEventsQuery))
@@ -270,12 +253,36 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 		log.L.Fatalf("Error executing events query %v", nerr)
 	}
 
+	//Delete anything in SQL / Kibana that is older than the date we're starting at (so if we're redoing we don't have to worry about duplicates)
+	if !myLastKnownState.LastKnownStateTime.IsZero() {
+		log.L.Debugf("Removing future records for %v after %v", deviceName, myLastKnownState.LastKnownStateTime)
+		deleteQuery :=
+			`DELETE
+		FROM DisplayInputMetrics
+		WHERE DeviceID = @p1 and StartTime >= @p2`
+
+		sqlResult, err := db.Exec(deleteQuery, deviceName, myLastKnownState.LastKnownStateTime)
+
+		if err != nil {
+			log.L.Errorf("Unable to remove future Metrics records for %v: %v", deviceName, err.Error())
+			return
+		}
+
+		rowsAffected, err := sqlResult.RowsAffected()
+
+		if err != nil {
+			log.L.Errorf("Unable to get rows affected for %v: %v", deviceName, err.Error())
+			return
+		}
+
+		log.L.Debugf("Removed %v rows for %v", rowsAffected, deviceName)
+	}
+
 	//create slicer channels and start slicer
 	slicerChannel := make(chan MetricsRecord, 100)
-	slicerReadyDoneChannel := make(chan bool)
 	var slicerWG sync.WaitGroup
 	slicerWG.Add(1)
-	go sliceByHourAndClassSchedule(slicerChannel, slicerReadyDoneChannel, &slicerWG)
+	go sliceByHourAndClassSchedule(slicerChannel, &slicerWG)
 
 	log.L.Debugf("Found %v events for %v", len(response.Hits.Hits), deviceName)
 
@@ -284,6 +291,9 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 		// 	log.L.Fatalf("stop")
 		// }
 		src := oneEvent.Source
+		if len(src.Value) == 0 {
+			continue
+		}
 		src.Timestamp = src.Timestamp.Truncate(time.Second)
 		//Go through and create records for each change (should be each event)
 		if !currentState.StartTime.IsZero() {
@@ -297,9 +307,7 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 			copyOfCurrent.ElapsedSeconds = int(copyOfCurrent.EndTime.Sub(copyOfCurrent.StartTime).Seconds())
 
 			//send to slicer
-			//DEBUG DEBUG
-			//slicerChannel <- copyOfCurrent
-			sliceRecord(copyOfCurrent, nil)
+			slicerChannel <- copyOfCurrent
 		}
 
 		//now update the current state
@@ -341,19 +349,18 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 		copyOfCurrent.ElapsedSeconds = int(copyOfCurrent.EndTime.Sub(copyOfCurrent.StartTime).Seconds())
 
 		//send to slicer
-		//DEBUG DEBUG
-		//slicerChannel <- copyOfCurrent
-		sliceRecord(copyOfCurrent, nil)
+		slicerChannel <- copyOfCurrent
 
 		currentState.StartTime = lastHourEnd
 	}
 
+	//wait for slicers
+	close(slicerChannel)
+	slicerWG.Wait()
+
 	//update last state known in sql
 	lastKnownStateUpdateQuery :=
-		`UPDATE LastKnownStates
-		SET LastKnownStateTime = @p1,
-		LastKnownStateJSON = @p2
-		where DeviceID = @p3`
+		`EXEC UpdateLastKnownState @p1, @p2, @p3`
 
 	lastKnownStateJSON, err := json.Marshal(currentState)
 
@@ -364,35 +371,32 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 			log.L.Errorf("Unable to update last known state for %v: %v", deviceName, err.Error())
 		}
 	}
-
-	//wait for slicers
-	slicerReadyDoneChannel <- true
-	slicerWG.Wait()
 }
 
-func sliceByHourAndClassSchedule(slicerChannel chan MetricsRecord, slicerReadyDoneChannel chan bool, wg *sync.WaitGroup) {
+func sliceByHourAndClassSchedule(slicerChannel chan MetricsRecord, wg *sync.WaitGroup) {
 	defer wg.Done()
 	//start a record store channels and go routine
 	storeChannel := make(chan MetricsRecord, 100)
-	recordReadyDoneChannel := make(chan bool)
-	var recordWG sync.WaitGroup
-	recordWG.Add(1)
-	go storeRecord(storeChannel, recordReadyDoneChannel, &recordWG)
+	var storageWaitGroup sync.WaitGroup
+	storageWaitGroup.Add(1)
+
+	go storeRecord(storeChannel, &storageWaitGroup)
 
 	//wait for something to come down the channel
-ChannelLoop:
 	for {
-		select {
-		case recordToSlice := <-slicerChannel:
+		recordToSlice, more := <-slicerChannel
+		if more {
 			sliceRecord(recordToSlice, storeChannel)
-		case <-slicerReadyDoneChannel:
-			break ChannelLoop
+		} else {
+			break
 		}
 	}
 
+	//signal that we're done with the store channel
+	close(storeChannel)
+
 	//wait for all storage routines to finish
-	recordReadyDoneChannel <- true
-	wg.Wait()
+	storageWaitGroup.Wait()
 }
 
 func timeBetween(t, from, to time.Time) bool {
@@ -407,9 +411,6 @@ func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 	//slice up the record on each hour, as well as class schedule boundaries
 
 	for {
-		log.L.Debugf("slicing from %v to %v", recordToSlice.StartTime, recordToSlice.EndTime
-	)
-
 		//see if we have crossed to a different day
 		if recordToSlice.StartTime.Truncate(24*time.Hour) != classScheduleDate {
 			classSchedules, _ = uapiclassschedule.GetSimpleClassSchedulesForRoomAndDate(recordToSlice.RoomID, recordToSlice.StartTime)
@@ -482,13 +483,12 @@ func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 		copy.ElapsedSeconds = int(copy.EndTime.Sub(copy.StartTime).Seconds())
 		copy.StartHour = copy.StartTime.Hour()
 		copy.StartDayOfWeek = int(copy.StartTime.Weekday())
+		copy.StartDay = int(copy.StartTime.Day())
 		copy.StartMonth = int(copy.StartTime.Month())
 		copy.StartYear = copy.StartTime.Year()
 
 		//send the sliced record to the storage go routine
-		//DEBUG DEBUG
 		storeChannel <- copy
-		//storeRecordInSQL(copy)
 
 		//stop if we've done all of it
 		if hourEndTime.Equal(recordToSlice.EndTime) {
@@ -500,21 +500,25 @@ func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 	}
 }
 
-func storeRecord(storeChannel chan MetricsRecord, recordReadyDoneChannel chan bool, wg *sync.WaitGroup) {
+func storeRecord(storeChannel chan MetricsRecord, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	var RecordsToStore []MetricsRecord
 
 	//wait for something to come down the channel
-ChannelLoop:
 	for {
-		select {
-		case recordToStore := <-storeChannel:
-			//storeRecordInKibana(recordToStore)
-			//storeRecordInSQL(recordToStore)
+		recordToStore, more := <-storeChannel
+
+		if more {
 			RecordsToStore = append(RecordsToStore, recordToStore)
-		case <-recordReadyDoneChannel:
-			break ChannelLoop
+			//do them 5000 at a time
+			if len(RecordsToStore) > 5000 {
+				bulkInsertToSQL(RecordsToStore)
+				//clear it out
+				RecordsToStore = []MetricsRecord{}
+			}
+		} else {
+			break
 		}
 	}
 
@@ -553,11 +557,13 @@ func bulkInsertToSQL(recordsToStore []MetricsRecord) {
 		"DeviceID",
 		"RoomID",
 		"BuildingID",
+		"DeviceIDPrefix",
 		"StartTime",
 		"EndTime",
 		"ExceptionDateType",
 		"StartHour",
 		"StartDayOfWeek",
+		"StartDay",
 		"StartMonth",
 		"StartYear",
 		"ElapsedSeconds",
@@ -586,11 +592,13 @@ func bulkInsertToSQL(recordsToStore []MetricsRecord) {
 			recordToStore.DeviceID,
 			recordToStore.RoomID,
 			recordToStore.BuildingID,
+			recordToStore.DeviceIDPrefix,
 			recordToStore.StartTime,
 			recordToStore.EndTime,
 			recordToStore.ExceptionDateType,
 			recordToStore.StartHour,
 			recordToStore.StartDayOfWeek,
+			recordToStore.StartDay,
 			recordToStore.StartMonth,
 			recordToStore.StartYear,
 			recordToStore.ElapsedSeconds,
@@ -606,7 +614,8 @@ func bulkInsertToSQL(recordsToStore []MetricsRecord) {
 			recordToStore.InputType,
 			recordToStore.Input,
 			recordToStore.InputActiveSignal,
-			recordToStore.StatusDesc)
+			recordToStore.StatusDesc,
+		)
 
 		if err != nil {
 			log.L.Errorf("db error when storing record %v on device %v: %v", i, recordToStore.DeviceID, err.Error())
@@ -631,7 +640,11 @@ func bulkInsertToSQL(recordsToStore []MetricsRecord) {
 		log.L.Errorf("Error committing txn on device %v: %v", recordsToStore[0].DeviceID, err.Error())
 	}
 
-	x, _ := result.RowsAffected()
+	x, err := result.RowsAffected()
 
 	log.L.Debugf("%v record stored in %v", x, recordsToStore[0].DeviceID)
+
+	if err != nil {
+		log.L.Errorf("Error getting record count on device %v: %v", recordsToStore[0].DeviceID, err.Error())
+	}
 }
