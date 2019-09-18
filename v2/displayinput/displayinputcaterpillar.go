@@ -15,6 +15,7 @@ import (
 )
 
 var byuLocation *time.Location
+var numOfRoomsToDoAtOnce = 10
 
 func init() {
 	byuLocation, _ = time.LoadLocation("America/Denver")
@@ -75,7 +76,7 @@ func startDisplayInputCaterpillar() {
 
 	//get the value from SQL the last day we ran - we'll do the aggregation query back a month to make sure we got new ones
 	db, err := caterpillarmssql.GetDB()
-
+	defer db.Close()
 	if err != nil {
 		log.L.Fatalf("Unable to get DB connection %v", err)
 	}
@@ -105,7 +106,7 @@ func startDisplayInputCaterpillar() {
 				"terms": {
 				  "key": [ "input", "power", "active-signal", "blanked"  ]
 				}
-			  }			  
+			  }
 			]
 		  }
 		},
@@ -114,7 +115,8 @@ func startDisplayInputCaterpillar() {
 				  "terms" : 
 				  { 
 					"field" : "target-device.deviceID",
-					"size": 10000
+					"size": 10000,
+					"order": { "_term" : "asc" }
 				  }
 			  }
 		  },
@@ -123,7 +125,8 @@ func startDisplayInputCaterpillar() {
 	  
 	`
 
-	q = strings.ReplaceAll(q, "$STARTDATE", lastKnownStateTime.LastKnownStateTime.Format("2006-01-02T15:04-07:00"))
+	//q = strings.ReplaceAll(q, "$STARTDATE", lastKnownStateTime.LastKnownStateTime.Format("2006-01-02T15:04-07:00"))
+	q = strings.ReplaceAll(q, "$STARTDATE", "2017-01-01")
 	query, nerr := elkquery.GetQueryTemplateFromString([]byte(q))
 	if nerr != nil {
 		log.L.Fatalf("Unable to translate query string %v", nerr)
@@ -141,17 +144,51 @@ func startDisplayInputCaterpillar() {
 		log.L.Fatalf("Unable to convert device aggs")
 	}
 
-	var wg sync.WaitGroup
+	// //let's try this non-concurrently
+	// for _, bucket := range responseAggs.Devices.Buckets {
+	// 	caterpillarDevice(bucket.Key)
+	// }
+
+	//only do 5 rooms at a time
+	deviceNamePipe := make(chan string, numOfRoomsToDoAtOnce)
+	done := make(chan bool)
+	go watchCaterpillarDevicePipe(deviceNamePipe, done)
+
 	//launch a go routine for each of the devices
-	for _, bucket := range responseAggs.Devices.Buckets {
-		wg.Add(1)
-		go caterpillarDevice(bucket.Key, &wg)
+	for i, bucket := range responseAggs.Devices.Buckets {
+		log.L.Debugf("Sending %v down pipe - %v of %v, %.2f pct", bucket.Key, i, len(responseAggs.Devices.Buckets),
+			float64(i)/float64(len(responseAggs.Devices.Buckets))*100)
+		deviceNamePipe <- bucket.Key
 	}
 
 	//wait for them all to finish
-	wg.Wait()
+	close(deviceNamePipe)
+	<-done
 
 	//wait for turn off message, run now message, or the timeout and then do it again
+}
+
+func watchCaterpillarDevicePipe(deviceNamePipe chan string, done chan bool) {
+	wg := sync.WaitGroup{}
+	i := 0
+	for {
+		deviceName, more := <-deviceNamePipe
+		if more {
+			wg.Add(1)
+			i++
+			go caterpillarDevice(deviceName, &wg)
+			if i == numOfRoomsToDoAtOnce {
+				//wait for these numOfRoomsToDoAtOnce then restart
+				wg.Wait()
+				i = 0
+				wg = sync.WaitGroup{}
+			}
+		} else {
+			wg.Wait()
+			done <- true
+			return
+		}
+	}
 }
 
 func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
@@ -159,6 +196,7 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 
 	//Get from SQL the last state known
 	db, err := caterpillarmssql.GetDB()
+	defer db.Close()
 	if err != nil {
 		log.L.Errorf("Unable to get db working on device %v: %v", deviceName, err.Error())
 		return
@@ -250,7 +288,7 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 	log.L.Debugf("Executing elk query for %v", deviceName)
 	response, nerr := elkquery.ExecuteElkQuery("av-delta-events*", query)
 	if nerr != nil {
-		log.L.Fatalf("Error executing events query %v", nerr)
+		log.L.Fatalf("Error executing events query for %v: %v", deviceName, nerr)
 	}
 
 	//Delete anything in SQL / Kibana that is older than the date we're starting at (so if we're redoing we don't have to worry about duplicates)
@@ -285,15 +323,14 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 	go sliceByHourAndClassSchedule(slicerChannel, &slicerWG)
 
 	log.L.Debugf("Found %v events for %v", len(response.Hits.Hits), deviceName)
-
+	realEventCount := 0
 	for _, oneEvent := range response.Hits.Hits {
-		// if i > 10 {
-		// 	log.L.Fatalf("stop")
-		// }
 		src := oneEvent.Source
 		if len(src.Value) == 0 {
 			continue
 		}
+
+		realEventCount++
 		src.Timestamp = src.Timestamp.Truncate(time.Second)
 		//Go through and create records for each change (should be each event)
 		if !currentState.StartTime.IsZero() {
@@ -333,6 +370,10 @@ func caterpillarDevice(deviceName string, wg *sync.WaitGroup) {
 		} else if strings.ToLower(currentState.Power) == "on" && strings.ToLower(currentState.Blanked) == "false" {
 			currentState.StatusDesc = currentState.Input + "-" + currentState.InputActiveSignal
 		}
+	}
+
+	if realEventCount == 0 {
+		return
 	}
 
 	//Update the current state record to be up to the latest whole hour that is more than an hour old
@@ -538,13 +579,11 @@ func bulkInsertToSQL(recordsToStore []MetricsRecord) {
 		len(recordsToStore), recordsToStore[0].DeviceID)
 
 	db, err := caterpillarmssql.GetRawDB()
-
+	defer db.Close()
 	if err != nil {
 		log.L.Errorf("Unable to get raw db to store records on device %v: %v", recordsToStore[0].DeviceID, err.Error())
 		return
 	}
-
-	defer db.Close()
 
 	txn, err := db.Begin()
 
