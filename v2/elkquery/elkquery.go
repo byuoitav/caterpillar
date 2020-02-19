@@ -1,14 +1,23 @@
 package elkquery
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/http"
+	"os"
 	"time"
 
+	"github.com/byuoitav/common/log"
 	"github.com/byuoitav/common/nerr"
 	"github.com/byuoitav/common/v2/events"
-	"github.com/byuoitav/shipwright/elk"
+)
+
+var (
+	APIAddr  = os.Getenv("ELK_DIRECT_ADDRESS") // or should this be ELK_ADDR?
+	username = os.Getenv("ELK_SA_USERNAME")
+	password = os.Getenv("ELK_SA_PASSWORD")
 )
 
 //QueryTemplate shows the template that we use for elk queries. The queries specified for a specific caterpillar wil be unmarshalled into this structure.
@@ -76,11 +85,12 @@ type QueryResponse struct {
 }
 
 //GetQueryTemplateFromFile .
-func GetQueryTemplateFromFile(file string) (QueryTemplate, *nerr.E) {
+func GetQueryTemplateFromFile(file string) (QueryTemplate, error) {
 
 	b, err := ioutil.ReadFile(file)
 	if err != nil {
-		return QueryTemplate{}, nerr.Translate(err).Addf("couldn't get query template from file. Couldn't read file %v.", file)
+
+		return QueryTemplate{}, err
 	}
 
 	return GetQueryTemplateFromString(b)
@@ -107,7 +117,7 @@ func ExecuteElkQuery(indexName string, q QueryTemplate) (QueryResponse, *nerr.E)
 		return QueryResponse{}, nerr.Translate(er).Addf("Couldn't execute query.")
 	}
 
-	resp, err := elk.MakeELKRequest("POST", fmt.Sprintf("/%v/_search", indexName), b)
+	resp, err := MakeELKRequest("POST", fmt.Sprintf("/%v/_search", indexName), b)
 	if err != nil {
 		return QueryResponse{}, err.Addf("COuldn't get count of documents for index name %v", indexName)
 	}
@@ -119,4 +129,82 @@ func ExecuteElkQuery(indexName string, q QueryTemplate) (QueryResponse, *nerr.E)
 	}
 
 	return toReturn, nil
+}
+
+//MakeELKRequest .
+func MakeELKRequest(method, endpoint string, body interface{}) ([]byte, *nerr.E) {
+	if len(APIAddr) == 0 {
+		log.L.Fatalf("ELK_DIRECT_ADDRESS is not set.")
+	}
+
+	// format whole address
+	addr := fmt.Sprintf("%s%s", APIAddr, endpoint)
+	log.L.Debugf("Making ELK request against: %s", addr)
+
+	user := username
+	pass := password
+	if len(user) == 0 || len(pass) == 0 {
+		if len(user) == 0 || len(pass) == 0 {
+			log.L.Fatalf("ELK_SA_USERNAME, or ELK_SA_PASSWORD is not set.")
+		}
+	}
+
+	var reqBody []byte
+	var err error
+
+	// marshal request if not already an array of bytes
+	switch v := body.(type) {
+	case []byte:
+		reqBody = v
+	default:
+		// marshal the request
+		reqBody, err = json.Marshal(v)
+		if err != nil {
+			return []byte{}, nerr.Translate(err)
+		}
+	}
+	//	log.L.Debugf("Body: %s", reqBody)
+
+	// create the request
+	req, err := http.NewRequest(method, addr, bytes.NewReader(reqBody))
+	if err != nil {
+		return []byte{}, nerr.Translate(err)
+	}
+
+	if len(user) == 0 || len(pass) == 0 {
+		// add auth
+		req.SetBasicAuth(user, pass)
+	} else {
+		req.SetBasicAuth(user, pass)
+	}
+
+	// add headers
+	if method == http.MethodPost || method == http.MethodPut {
+		req.Header.Add("content-type", "application/json")
+	}
+
+	client := http.Client{
+		Timeout: 3 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return []byte{}, nerr.Translate(err)
+	}
+	defer resp.Body.Close()
+
+	// read the resp
+	respBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return []byte{}, nerr.Translate(err)
+	}
+
+	// check resp code
+	if resp.StatusCode/100 != 2 {
+		msg := fmt.Sprintf("non 200 reponse code received. code: %v, body: %s", resp.StatusCode, respBody)
+		return respBody, nerr.Create(msg, http.StatusText(resp.StatusCode))
+	}
+
+	return respBody, nil
+
 }

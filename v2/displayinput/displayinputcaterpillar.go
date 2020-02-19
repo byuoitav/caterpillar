@@ -106,6 +106,11 @@ func startDisplayInputCaterpillar() {
 				"terms": {
 				  "key": [ "input", "power", "active-signal", "blanked"  ]
 				}
+			  },
+			  {
+				"term": {
+				  "target-device.roomID": "JRCB-267"
+				}
 			  }
 			]
 		  }
@@ -144,26 +149,28 @@ func startDisplayInputCaterpillar() {
 		log.L.Fatalf("Unable to convert device aggs")
 	}
 
-	// //let's try this non-concurrently
-	// for _, bucket := range responseAggs.Devices.Buckets {
-	// 	caterpillarDevice(bucket.Key)
-	// }
-
-	//only do 5 rooms at a time
-	deviceNamePipe := make(chan string, numOfRoomsToDoAtOnce)
-	done := make(chan bool)
-	go watchCaterpillarDevicePipe(deviceNamePipe, done)
-
-	//launch a go routine for each of the devices
-	for i, bucket := range responseAggs.Devices.Buckets {
-		log.L.Debugf("Sending %v down pipe - %v of %v, %.2f pct", bucket.Key, i, len(responseAggs.Devices.Buckets),
-			float64(i)/float64(len(responseAggs.Devices.Buckets))*100)
-		deviceNamePipe <- bucket.Key
+	//let's try this non-concurrently
+	for _, bucket := range responseAggs.Devices.Buckets {
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		caterpillarDevice(bucket.Key, &wg)
 	}
 
-	//wait for them all to finish
-	close(deviceNamePipe)
-	<-done
+	// //only do 5 rooms at a time
+	// deviceNamePipe := make(chan string, numOfRoomsToDoAtOnce)
+	// done := make(chan bool)
+	// go watchCaterpillarDevicePipe(deviceNamePipe, done)
+
+	// //launch a go routine for each of the devices
+	// for i, bucket := range responseAggs.Devices.Buckets {
+	// 	log.L.Debugf("Sending %v down pipe - %v of %v, %.2f pct", bucket.Key, i, len(responseAggs.Devices.Buckets),
+	// 		float64(i)/float64(len(responseAggs.Devices.Buckets))*100)
+	// 	deviceNamePipe <- bucket.Key
+	// }
+
+	// //wait for them all to finish
+	// close(deviceNamePipe)
+	// <-done
 
 	//wait for turn off message, run now message, or the timeout and then do it again
 }
