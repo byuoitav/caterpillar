@@ -70,7 +70,7 @@ type MetricsRecord struct {
 	StatusDesc        string `json:"StatusDesc" db:"StatusDesc"`
 }
 
-func StartDisplayInputCaterpillar() {
+func StartDisplayInputCaterpillar(building string) {
 
 	log.L.Debugf("Starting Display Input Caterpillar")
 
@@ -109,7 +109,7 @@ func StartDisplayInputCaterpillar() {
 			  },
 			  {
 				"term": {
-				  "target-device.buildingID": "JRCB"
+				  "target-device.buildingID": "$BUILDING"
 				}
 			  }
 			]
@@ -130,9 +130,9 @@ func StartDisplayInputCaterpillar() {
 	  
 	`
 
-	//q = strings.ReplaceAll(q, "$STARTDATE", lastKnownStateTime.LastKnownStateTime.Format("2006-01-02T15:04-07:00"))
 	q = strings.ReplaceAll(q, "$STARTDATE", "2017-01-01")
-	//q = strings.ReplaceAll(q, "$STARTDATE", "2020-02-05")
+	q = strings.ReplaceAll(q, "$BUILDING", building)
+
 	query, nerr := elkquery.GetQueryTemplateFromString([]byte(q))
 	if nerr != nil {
 		log.L.Fatalf("Unable to translate query string %v", nerr)
