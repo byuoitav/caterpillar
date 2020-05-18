@@ -8,5 +8,5 @@ import (
 
 func Test(t *testing.T) {
 	log.SetLevel("debug")
-	StartDisplayInputCaterpillar()
+	StartDisplayInputCaterpillar("HCEB")
 }

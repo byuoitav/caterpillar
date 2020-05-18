@@ -109,7 +109,7 @@ func StartDisplayInputCaterpillar(building string) {
 			  },
 			  {
 				"term": {
-				  "target-device.buildingID": "$BUILDING"
+				  "target-device.roomID": "$BUILDING"
 				}
 			  }
 			]
