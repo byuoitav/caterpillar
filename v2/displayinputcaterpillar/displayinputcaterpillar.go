@@ -16,6 +16,7 @@ import (
 
 var byuLocation *time.Location
 var numOfRoomsToDoAtOnce = 10
+var maxLength = 250
 
 func init() {
 	byuLocation, _ = time.LoadLocation("America/Denver")
@@ -37,7 +38,7 @@ type lastKnownState struct {
 	LastKnownStateJSON string    `db:"LastKnownStateJSON"`
 }
 
-//MetricsRecord ...
+// MetricsRecord ...
 type MetricsRecord struct {
 	DeviceID       string `json:"DeviceID" db:"DeviceID"`
 	RoomID         string `json:"RoomID" db:"RoomID"`
@@ -78,6 +79,7 @@ func StartDisplayInputCaterpillar(building string) {
 	db, err := caterpillarmssql.GetDB()
 	defer db.Close()
 	if err != nil {
+		log.L.Debugf("UNABLE TO GET DB Connection")
 		log.L.Fatalf("Unable to get DB connection %v", err)
 	}
 
@@ -86,6 +88,7 @@ func StartDisplayInputCaterpillar(building string) {
 	}
 	err = db.Get(&lastKnownStateTime, "SELECT isnull(min(LastKnownStateTime), '1/1/1980') as LastKnownStateTime from LastKnownStates")
 	if err != nil {
+		log.L.Debugf("Unable to get min last known state time")
 		log.L.Fatalf("Unable to get min last known state time %v", err)
 	}
 
@@ -109,7 +112,7 @@ func StartDisplayInputCaterpillar(building string) {
 			  },
 			  {
 				"term": {
-				  "target-device.roomID": "$BUILDING"
+				  "target-device.buildingID": "$BUILDING"
 				}
 			  }
 			]
@@ -133,6 +136,8 @@ func StartDisplayInputCaterpillar(building string) {
 	q = strings.ReplaceAll(q, "$STARTDATE", "2017-01-01")
 	q = strings.ReplaceAll(q, "$BUILDING", building)
 
+	// fmt.Printf("TEST: %v", q)
+
 	query, nerr := elkquery.GetQueryTemplateFromString([]byte(q))
 	if nerr != nil {
 		log.L.Fatalf("Unable to translate query string %v", nerr)
@@ -140,18 +145,22 @@ func StartDisplayInputCaterpillar(building string) {
 
 	response, nerr := elkquery.ExecuteElkQuery("av-delta-events*", query)
 	if nerr != nil {
+		log.L.Debugf("Error executing query")
 		log.L.Fatalf("Error executing query %v", nerr)
 	}
-
+	log.L.Debugf("Passed ELKQUERY")
 	var responseAggs deviceAggregations
 	x, _ := json.Marshal(response.Aggregations)
 	err = json.Unmarshal(x, &responseAggs)
 	if err != nil {
+		log.L.Debugf("Unable to convert device aggs")
 		log.L.Fatalf("Unable to convert device aggs")
 	}
-
-	//process each device
+	log.L.Debugf("Passed aggregation")
+	log.L.Debugf("Devices: %v", responseAggs.Devices)
+	// process each device
 	for _, bucket := range responseAggs.Devices.Buckets {
+		log.L.Debugf("Bucket Key: %v", bucket.Key)
 		caterpillarDevice(bucket.Key)
 	}
 }
@@ -159,12 +168,13 @@ func StartDisplayInputCaterpillar(building string) {
 func caterpillarDevice(deviceName string) {
 	//Get from SQL the last state known
 	db, err := caterpillarmssql.GetDB()
-	defer db.Close()
 	if err != nil {
+		log.L.Debugf("Unable to get db working on device")
 		log.L.Errorf("Unable to get db working on device %v: %v", deviceName, err.Error())
 		return
 	}
-
+	defer db.Close()
+	log.L.Debugf("Into the Caterpillar Device function")
 	lastKnownStateQuery :=
 		`SELECT *
 		from LastKnownStates
@@ -245,12 +255,15 @@ func caterpillarDevice(deviceName string) {
 
 	query, nerr := elkquery.GetQueryTemplateFromString([]byte(getEventsQuery))
 	if nerr != nil {
+		log.L.Debugf("UNABLE TO TRANSLATE")
 		log.L.Fatalf("Unable to translate get events query %v", nerr)
+
 	}
 
 	log.L.Debugf("Executing elk query for %v", deviceName)
 	response, nerr := elkquery.ExecuteElkQuery("av-delta-events*", query)
 	if nerr != nil {
+		log.L.Debugf("UNABLE TO EXECUTE EVENT QUERY")
 		log.L.Fatalf("Error executing events query for %v: %v", deviceName, nerr)
 	}
 
@@ -356,7 +369,7 @@ func caterpillarDevice(deviceName string) {
 			copyOfCurrent.EndTime = lastHourEnd
 			copyOfCurrent.ElapsedSeconds = int(copyOfCurrent.EndTime.Sub(copyOfCurrent.StartTime).Seconds())
 
-			//send to slicer
+			//send to slicer - function that gets the class schedule
 			sliceRecord(copyOfCurrent, storeChannel)
 
 			currentState.StartTime = lastHourEnd
@@ -397,16 +410,16 @@ func truncateDateOnlyWithTimezone(toRound time.Time) time.Time {
 func sliceRecord(recordToSlice MetricsRecord, storeChannel chan MetricsRecord) {
 	//for this record, get the class schedules from the memory cache (or WSO2 if not pulled yet)
 	//get all the classes for the whole day so we don't have to hit it a bunch
-	//debugTime, _ := time.Parse(time.RFC822, "05 Feb 20 06:00 UTC")
+	debugTime, _ := time.Parse(time.RFC822, "05 Feb 20 06:00 UTC")
 
 	classScheduleDate := truncateDateOnlyWithTimezone(recordToSlice.StartTime.In(byuLocation))
 	classSchedules, _ := uapiclassschedule.GetSimpleClassSchedulesForRoomAndDate(recordToSlice.RoomID, classScheduleDate)
 
-	// if recordToSlice.EndTime.After(debugTime) {
-	// 	log.L.Debugf("Start time = " + recordToSlice.StartTime.String())
-	// 	log.L.Debugf("Start time (BYU) = " + recordToSlice.StartTime.In(byuLocation).String())
-	// 	log.L.Debugf("%v classes found for date %s", len(classSchedules), classScheduleDate.String())
-	// }
+	if recordToSlice.EndTime.After(debugTime) {
+		log.L.Debugf("Start time = " + recordToSlice.StartTime.String())
+		log.L.Debugf("Start time (BYU) = " + recordToSlice.StartTime.In(byuLocation).String())
+		log.L.Debugf("%v classes found for date %s", len(classSchedules), classScheduleDate.String())
+	}
 
 	//slice up the record on each hour, as well as class schedule boundaries
 	for {
@@ -538,14 +551,14 @@ func bulkInsertToSQL(recordsToStore []MetricsRecord) {
 	db, err := caterpillarmssql.GetRawDB()
 	defer db.Close()
 	if err != nil {
-		log.L.Errorf("Unable to get raw db to store records on device %v: %v", recordsToStore[0].DeviceID, err.Error())
+		log.L.Debugf("Unable to get raw db to store records on device %v: %v", recordsToStore[0].DeviceID, err.Error())
 		return
 	}
 
 	txn, err := db.Begin()
 
 	if err != nil {
-		log.L.Errorf("Unable to start txn to store records on device %v: %v", recordsToStore[0].DeviceID, err.Error())
+		log.L.Debugf("Unable to start txn to store records on device %v: %v", recordsToStore[0].DeviceID, err.Error())
 		return
 	}
 
@@ -584,6 +597,11 @@ func bulkInsertToSQL(recordsToStore []MetricsRecord) {
 	}
 
 	for i, recordToStore := range recordsToStore {
+		if len(recordToStore.InstructorName) > maxLength {
+			log.L.Debugf("Instructor Name is too long for SQL Field: %v", recordToStore.InstructorName)
+			recordToStore.InstructorName = recordToStore.InstructorName[:maxLength]
+			log.L.Debugf("Instructor Name has been shortened to 250 characters")
+		}
 		_, err = stmt.Exec(
 			recordToStore.DeviceID,
 			recordToStore.RoomID,
@@ -633,7 +651,7 @@ func bulkInsertToSQL(recordsToStore []MetricsRecord) {
 	err = txn.Commit()
 
 	if err != nil {
-		log.L.Errorf("Error committing txn on device %v: %v", recordsToStore[0].DeviceID, err.Error())
+		log.L.Debugf("Error committing txn on device %v: %v", recordsToStore[0].DeviceID, err.Error())
 	}
 
 	x, err := result.RowsAffected()

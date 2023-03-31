@@ -20,8 +20,8 @@ var (
 	password = os.Getenv("ELK_SA_PASSWORD")
 )
 
-//QueryTemplate shows the template that we use for elk queries. The queries specified for a specific caterpillar wil be unmarshalled into this structure.
-//Becasue we may have to batch documents from ELK the query should NOT include a date/time range query. This will be added by the feeder as it retreives data.
+// QueryTemplate shows the template that we use for elk queries. The queries specified for a specific caterpillar wil be unmarshalled into this structure.
+// Becasue we may have to batch documents from ELK the query should NOT include a date/time range query. This will be added by the feeder as it retreives data.
 type QueryTemplate struct {
 	Query  QueryDSL            `json:"query,omitempty"`
 	Aggs   interface{}         `json:"aggs,omitempty"`
@@ -31,12 +31,12 @@ type QueryTemplate struct {
 	Source interface{}         `json:"_source,omitempty"`
 }
 
-//QueryDSL .
+// QueryDSL .
 type QueryDSL struct {
 	Bool BoolQueryDSL `json:"bool,omitempty"`
 }
 
-//BoolQueryDSL .
+// BoolQueryDSL .
 type BoolQueryDSL struct {
 	Must               interface{}   `json:"must,omitempty"`
 	Should             interface{}   `json:"should,omitempty"`
@@ -45,24 +45,24 @@ type BoolQueryDSL struct {
 	MinimumShouldMatch int           `json:"minimum_should_match,omitempty"`
 }
 
-//TimeRangeFilter .
+// TimeRangeFilter .
 type TimeRangeFilter struct {
 	Range map[string]DateRange `json:"range,omitempty"`
 }
 
-//DateRange .
+// DateRange .
 type DateRange struct {
 	StartTime time.Time `json:"gt"` //no omitempty on purpose
 	EndTime   time.Time `json:"lte,omimempty"`
 }
 
-//CountResponse .
+// CountResponse .
 type CountResponse struct {
 	Count  int            `json:"count"`
 	Shards map[string]int `json:"_shards"`
 }
 
-//QueryResponse is a response from ELK with hits included
+// QueryResponse is a response from ELK with hits included
 type QueryResponse struct {
 	Took     int  `json:"took"`
 	TimedOut bool `json:"timed_out"`
@@ -84,7 +84,7 @@ type QueryResponse struct {
 	Aggregations interface{} `json:"aggregations"`
 }
 
-//GetQueryTemplateFromFile .
+// GetQueryTemplateFromFile .
 func GetQueryTemplateFromFile(file string) (QueryTemplate, error) {
 
 	b, err := ioutil.ReadFile(file)
@@ -109,29 +109,33 @@ func GetQueryTemplateFromString(query []byte) (QueryTemplate, *nerr.E) {
 	return toReturn, nil
 }
 
-//ExecuteElkQuery ...
+// ExecuteElkQuery ...
 func ExecuteElkQuery(indexName string, q QueryTemplate) (QueryResponse, *nerr.E) {
 
 	b, er := json.Marshal(q)
 	if er != nil {
+		log.L.Debugf("Error!")
 		return QueryResponse{}, nerr.Translate(er).Addf("Couldn't execute query.")
 	}
-
 	resp, err := MakeELKRequest("POST", fmt.Sprintf("/%v/_search", indexName), b)
 	if err != nil {
+		log.L.Debugf("Error2!")
 		return QueryResponse{}, err.Addf("COuldn't get count of documents for index name %v", indexName)
 	}
 	var toReturn QueryResponse
 
 	er = json.Unmarshal(resp, &toReturn)
 	if er != nil {
+		log.L.Debugf("Error3!")
 		return QueryResponse{}, nerr.Translate(er).Addf("Couldn't execute query.")
 	}
+	log.L.Debugf("QueryReponse: %v", toReturn)
 
+	log.L.Debugf("Debugging!")
 	return toReturn, nil
 }
 
-//MakeELKRequest .
+// MakeELKRequest .
 func MakeELKRequest(method, endpoint string, body interface{}) ([]byte, *nerr.E) {
 	if len(APIAddr) == 0 {
 		log.L.Fatalf("ELK_DIRECT_ADDRESS is not set.")
@@ -145,10 +149,10 @@ func MakeELKRequest(method, endpoint string, body interface{}) ([]byte, *nerr.E)
 	pass := password
 	if len(user) == 0 || len(pass) == 0 {
 		if len(user) == 0 || len(pass) == 0 {
+			log.L.Debugf("ELK username and password are not set")
 			log.L.Fatalf("ELK_SA_USERNAME, or ELK_SA_PASSWORD is not set.")
 		}
 	}
-
 	var reqBody []byte
 	var err error
 
@@ -163,7 +167,7 @@ func MakeELKRequest(method, endpoint string, body interface{}) ([]byte, *nerr.E)
 			return []byte{}, nerr.Translate(err)
 		}
 	}
-	//	log.L.Debugf("Body: %s", reqBody)
+	log.L.Debugf("Body: %s", reqBody)
 
 	// create the request
 	req, err := http.NewRequest(method, addr, bytes.NewReader(reqBody))
@@ -198,7 +202,7 @@ func MakeELKRequest(method, endpoint string, body interface{}) ([]byte, *nerr.E)
 	if err != nil {
 		return []byte{}, nerr.Translate(err)
 	}
-
+	// Log.L.Debugf("Read OUT: %v", respBody)
 	// check resp code
 	if resp.StatusCode/100 != 2 {
 		msg := fmt.Sprintf("non 200 reponse code received. code: %v, body: %s", resp.StatusCode, respBody)

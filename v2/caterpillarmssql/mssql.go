@@ -18,7 +18,7 @@ func init() {
 	}
 }
 
-//GetDB get a db object so we can do
+// GetDB get a db object so we can do
 func GetDB() (*sqlx.DB, error) {
 
 	db, err := sqlx.Connect("sqlserver", connString)
@@ -27,10 +27,11 @@ func GetDB() (*sqlx.DB, error) {
 		log.L.Debugf("Error connecting to SQL %v", err.Error())
 		return nil, err
 	}
+	log.L.Debugf("Connected to DB")
 	return db, nil
 }
 
-//GetRawDB ..
+// GetRawDB ..
 func GetRawDB() (*sql.DB, error) {
 	db, err := sql.Open("mssql", connString)
 
