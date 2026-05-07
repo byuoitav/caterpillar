@@ -1,6 +1,6 @@
 NAME := caterpillar
 OWNER := byuoitav
-PKG := github.com/${OWNER}/${NAME}
+PKG := github.com/${OWNER}/${NAME}/v2
 DOCKER_URL := ghcr.io
 
 # version:

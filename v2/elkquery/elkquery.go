@@ -62,6 +62,30 @@ type CountResponse struct {
 	Shards map[string]int `json:"_shards"`
 }
 
+// HitsTotal supports both ES5 integer totals and ES7+ object totals.
+type HitsTotal struct {
+	Value int `json:"value"`
+}
+
+// UnmarshalJSON keeps compatibility with both legacy and current Elasticsearch responses.
+func (h *HitsTotal) UnmarshalJSON(data []byte) error {
+	var value int
+	if err := json.Unmarshal(data, &value); err == nil {
+		h.Value = value
+		return nil
+	}
+
+	var total struct {
+		Value int `json:"value"`
+	}
+	if err := json.Unmarshal(data, &total); err != nil {
+		return err
+	}
+
+	h.Value = total.Value
+	return nil
+}
+
 // QueryResponse is a response from ELK with hits included
 type QueryResponse struct {
 	Took     int  `json:"took"`
@@ -73,7 +97,7 @@ type QueryResponse struct {
 		Failed     int `json:"failed"`
 	} `json:"_shards"`
 	Hits struct {
-		Total int `json:"total"`
+		Total HitsTotal `json:"total"`
 		Hits  []struct {
 			Index  string       `json:"_index"`
 			Type   string       `json:"_type"`

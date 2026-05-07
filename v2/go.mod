@@ -2,7 +2,7 @@ module github.com/byuoitav/caterpillar/v2
 
 go 1.17
 
-replace github.com/byuoitav/wso2services => /home/creeder/go/src/github.com/byuoitav/wso2services
+replace github.com/byuoitav/wso2services => /Users/creeder/Documents/Development/wso2services
 
 require (
 	github.com/byuoitav/common v0.0.0-20230217215806-8472d0ddbfb3

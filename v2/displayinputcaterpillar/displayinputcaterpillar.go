@@ -77,11 +77,11 @@ func StartDisplayInputCaterpillar(building string) {
 
 	//get the value from SQL the last day we ran - we'll do the aggregation query back a month to make sure we got new ones
 	db, err := caterpillarmssql.GetDB()
-	defer db.Close()
 	if err != nil {
 		log.L.Debugf("UNABLE TO GET DB Connection")
 		log.L.Fatalf("Unable to get DB connection %v", err)
 	}
+	defer db.Close()
 
 	var lastKnownStateTime struct {
 		LastKnownStateTime time.Time `db:"LastKnownStateTime"`
@@ -112,7 +112,7 @@ func StartDisplayInputCaterpillar(building string) {
 			  },
 			  {
 				"term": {
-				  "target-device.buildingID": "$BUILDING"
+				  "target-device.buildingID.keyword": "$BUILDING"
 				}
 			  }
 			]
@@ -122,9 +122,9 @@ func StartDisplayInputCaterpillar(building string) {
 			  "devices" : {
 				  "terms" : 
 				  { 
-					"field" : "target-device.deviceID",
+					"field" : "target-device.deviceID.keyword",
 					"size": 10000,
-					"order": { "_term" : "asc" }
+					"order": { "_key" : "asc" }
 				  }
 			  }
 		  },
@@ -239,7 +239,7 @@ func caterpillarDevice(deviceName string) {
 			},
 			{
 			  "term": {
-				"target-device.deviceID": "$DEVICEID"
+				"target-device.deviceID.keyword": "$DEVICEID"
 			  }
 			}
 		  ]
@@ -355,7 +355,7 @@ func caterpillarDevice(deviceName string) {
 		return
 	}
 
-	if response.Hits.Total == len(response.Hits.Hits) {
+	if response.Hits.Total.Value == len(response.Hits.Hits) {
 		//Update the current state record to be up to the latest whole hour that is more than an hour old
 		lastHourEnd := time.Now()
 		lastHourEnd = lastHourEnd.Truncate(time.Hour)
